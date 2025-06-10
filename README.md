@@ -37,7 +37,7 @@ Test use the sever-side implementations, use GeoServer of LuciadFusion
 Simply import the NPM package into your project
 
 ```
-npm install wfststore
+npm install ria-wfststore
 ``` 
 
 ## To use in your project 
