@@ -42,9 +42,13 @@ npm install wfststore
 
 ## To use in your project 
 
+
 WFSTFeatureStore works as any other LuciadRIA Store that supports read/write. Therefore it is interchangeable with other stores.
 
-You can use this store together with FeatureModel and Featurelayer.
+You can use this store together with `FeatureModel` and `Featurelayer`.
+
+### To query the service capabilities
+Normally you should start by interrogating the server to detect if WFS-T is supported, you can do this with `WFSCapabilitiesExtended`
 
 
 ```Typescript
@@ -57,7 +61,8 @@ WFSCapabilitiesExtended.fromURL(request, options).then(({wfsCapabilities, wfstCa
     });
 ```
 ### Creating a simple WFS-T Store
-* For this purpose use `WFSTFeatureStore`
+* For this purpose use `WFSTFeatureStore`, then use it with 'FeatureModel' and `Featurelayer` and insert it to the map.
+* You will need to wire to some Edit Controllers, you can refer to the LuciadRIA `Create and Edit` sample for that purpose.
 
 ```typescript
 const store = new WFSTFeatureStore({...options, serviceURL: "yoururl"});
@@ -73,8 +78,6 @@ const model = new FeatureModel(store, {reference: store.getReference()});
 const layer = new FeatureLayer(mdoel, {labe: "My WFST", editable: true});
 ```
 
-### To query the service capabilities
-Normally you should start by interrogating the server to detect if WFS-T is supported, you can do this with `WFSCapabilitiesExtended`
 
 
 ## Requirements
