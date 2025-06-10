@@ -32,13 +32,49 @@ npm run test
 Test use the sever-side implementations, use GeoServer of LuciadFusion 
 
 
-## To use in your project
+## To install in your project
 
 Simply import the NPM package into your project
 
 ```
 npm install wfststore
 ``` 
+
+## To use in your project 
+
+WFSTFeatureStore works as any other LuciadRIA Store that supports read/write. Therefore it is interchangeable with other stores.
+
+You can use this store together with FeatureModel and Featurelayer.
+
+
+```Typescript
+WFSCapabilitiesExtended.fromURL(request, options).then(({wfsCapabilities, wfstCapabilities}: WFSCapabilitiesExtendedResult) => {
+        const wfstCapable = wfstCapabilities.WFSTCapable;
+        const wfstOperations = wfstCapabilities.WFSTOperations;
+})
+    .catch((err) => {
+        handleHTTPErrors.handleError(err);
+    });
+```
+### Creating a simple WFS-T Store
+* For this purpose use `WFSTFeatureStore`
+
+```typescript
+const store = new WFSTFeatureStore({...options, serviceURL: "yoururl"});
+const model = new FeatureModel(store, {reference: store.getReference()});
+const layer = new FeatureLayer(mdoel, {labe: "My WFST", editable: true});
+```
+
+### Creating a simple WFS-T Store
+* For this purpose use `WFSTFeatureLockStore`
+```typescript
+const store = new WFSTFeatureLockStore({...options, serviceURL: "yoururl"});
+const model = new FeatureModel(store, {reference: store.getReference()});
+const layer = new FeatureLayer(mdoel, {labe: "My WFST", editable: true});
+```
+
+### To query the service capabilities
+Normally you should start by interrogating the server to detect if WFS-T is supported, you can do this with `WFSCapabilitiesExtended`
 
 
 ## Requirements
