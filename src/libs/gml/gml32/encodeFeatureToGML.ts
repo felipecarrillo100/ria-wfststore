@@ -1,5 +1,5 @@
 import {create} from 'xmlbuilder2';
-import {encodeGeometryToGML} from "./encodeGeometryToGML";
+import {EncodeGeometryDimension, encodeGeometryToGML} from "./encodeGeometryToGML";
 import {GMLGeometry} from "./GMLGeometry";
 
 // Define types for geometries and features
@@ -14,6 +14,7 @@ export interface GMLFeature {
 interface EncodeFeatureToGMLOptions {
     usePosList?: boolean;
     invert?: boolean;
+    forceDimension?: EncodeGeometryDimension;  // New option
     gmlVersion?: '3.2' | '3.1.1';
 }
 

@@ -4,6 +4,7 @@ import {MemoryStore} from "@luciad/ria/model/store/MemoryStore";
 import {encodeFeatureToGML, GMLFeature} from "./gml/gml32/encodeFeatureToGML";
 import {GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry} from "./ParseWFSFeatureDescription";
 import {GMLGeometry, GMLGeometryTypeNames} from "./gml/gml32/GMLGeometry";
+import {EncodeGeometryDimension} from "./gml/gml32/encodeGeometryToGML";
 
 const geoJSONCodec = new GeoJsonCodec({generateIDs: true});
 const geoJSONCodecPreserveIds = new GeoJsonCodec({generateIDs: false});
@@ -22,6 +23,7 @@ interface GMLEncoderOptions {
     targetGeometry?: GMLGeometryTypeKey;
     gmlVersion?: '3.2' | '3.1.1';
     invert?: boolean;
+    forceDimension?: EncodeGeometryDimension;
 }
 
 
@@ -37,6 +39,7 @@ export class GMLFeatureEncoder {
     private wrapToMultiCurve: boolean;
     private wrapToMultiPoint: boolean;
     private invert: boolean;
+    private forceDimension: EncodeGeometryDimension;
 
     constructor(options?: GMLEncoderOptions) {
         if (!options) options = {};
@@ -49,11 +52,12 @@ export class GMLFeatureEncoder {
         this.wrapToMultiCurve = typeof options.wrapToMultiCurve !== "undefined" ? options.wrapToMultiCurve: (this.targetGeometry === "MultiCurve" || this.targetGeometry === "MultiLineString");
         this.wrapToMultiPoint = typeof options.wrapToMultiPoint !== "undefined" ? options.wrapToMultiPoint: (this.targetGeometry === "MultiPoint");
         this.invert = options.invert;
+        this.forceDimension = options.forceDimension;
     }
 
     encodeFeature(feature: Feature) {
         const featureAsJSON = this.SingleFeatureGMLasJSONEncode(feature);
-        const gmlFeature = encodeFeatureToGML(featureAsJSON, { gmlVersion: this.gmlVersion, invert: this.invert });
+        const gmlFeature = encodeFeatureToGML(featureAsJSON, { gmlVersion: this.gmlVersion, invert: this.invert, forceDimension: this.forceDimension});
         return {
             geometryType: featureAsJSON.geometry.type,
             feature: gmlFeature,
