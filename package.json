@@ -1,6 +1,6 @@
 {
   "name": "ria-wfststore",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Implements a WFS Store capable of WFS-T transactions",
   "files": [
     "lib/"
@@ -36,6 +36,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/felipecarrillo100/wfststore"
+    "url": "git+https://github.com/felipecarrillo100/ria-wfststore"
   }
 }

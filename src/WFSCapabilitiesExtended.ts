@@ -15,7 +15,7 @@ export interface WFSTOperationsKeys {
     GetFeatureWithLock?: WFSTOperationsProperties;
 }
 
-interface WFSTExtendedProperties {
+export interface WFSTExtendedProperties {
     WFSTCapable: boolean
     WFSTOperations: WFSTOperationsKeys;
 }
