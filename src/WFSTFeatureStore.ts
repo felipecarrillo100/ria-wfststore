@@ -169,16 +169,11 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                                 this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
                                 resolve(null);
                             } else {
-                                //  Temporarily workaround: This should be removed once LuciadRIA fixes bug with labels February/2025
-                                eventSupport.emit("StoreChanged", "remove", undefined, frozenFeature.id);
-                                setTimeout(()=>{
-                                    //  Temporarily workaround: This should be removed once LuciadFusion fixes the issue auto-generated id incremented on update
-                                    frozenFeature.id = resourceId;
-                                    // eventSupport.emit("StoreChanged",  "update", feature, resourceId);
-                                    eventSupport.emit("StoreChanged",  "add", frozenFeature, resourceId);
-                                    resolve(feature.id);
-                                    this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
-                                }, 33);
+                                //  Workaround was removed
+                                frozenFeature.id = resourceId;
+                                eventSupport.emit("StoreChanged",  "add", frozenFeature, resourceId);
+                                resolve(feature.id);
+                                this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
                             }
                         });
                     } else this.handleOtherHttpErrors(response, resolve)
@@ -227,16 +222,11 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                                      this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
                                      resolve(null);
                                  } else {
-                                     //  Temporarily workaround: This should be removed once LuciadRIA fixes bug with labels February/2025
-                                     eventSupport.emit("StoreChanged", "remove", undefined, frozenFeature.id);
-                                     setTimeout(()=>{
-                                         //  Temporarily workaround: This should be removed once LuciadFusion fixes the issue auto-generated id incremented on update
-                                         frozenFeature.id = resourceId;
-                                         // eventSupport.emit("StoreChanged", "update", feature, resourceId);
-                                         eventSupport.emit("StoreChanged",  "add", frozenFeature, resourceId);
-                                         resolve(feature.id);
-                                         this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
-                                     }, 33);
+                                     // Workaround removed
+                                     frozenFeature.id = resourceId;
+                                     eventSupport.emit("StoreChanged",  "add", frozenFeature, resourceId);
+                                     resolve(feature.id);
+                                     this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
                                  }
                              });
                          } else this.handleOtherHttpErrors(response, resolve)
