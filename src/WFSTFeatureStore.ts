@@ -742,11 +742,6 @@ function getOutputFormat(e, t = []) {
     return getFirstFormatOfType(t, "gml") ?? DEFAULT_OUTPUT_GML_WFS_2
 }
 
-function getAutoDetectedCodec(e) {
-    const t = undefined;
-    return "gml" === getOutputType(e ? [e] : []) ? new GMLCodec : new GeoJsonCodec
-}
-
 function mergeRequestMethods(e, t) {
     if (!t || !Array.isArray(t) || !t.length) return e;
     const o = e.filter((e => t.indexOf(e) > -1));
