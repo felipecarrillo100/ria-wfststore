@@ -1,6 +1,6 @@
 {
   "name": "ria-wfststore",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Implements a WFS Store capable of WFS-T transactions",
   "files": [
     "lib/"

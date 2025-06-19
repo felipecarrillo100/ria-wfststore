@@ -1,4 +1,7 @@
-import {WFSFeatureStore, WFSFeatureStoreConstructorOptions} from "@luciad/ria/model/store/WFSFeatureStore";
+import {
+    WFSFeatureStore,
+    WFSFeatureStoreConstructorOptions, WFSFeatureStoreCreateOptions, WFSQueryOptions,
+} from "@luciad/ria/model/store/WFSFeatureStore";
 import {Feature, FeatureId} from "@luciad/ria/model/feature/Feature";
 import {Handle} from "@luciad/ria/util/Evented";
 import {WFSTQueries} from "./libs/WFSTQueries";
@@ -15,8 +18,16 @@ import {WFSVersion} from "@luciad/ria/ogc/WFSVersion";
 import {CoordinateReference} from "@luciad/ria/reference/CoordinateReference";
 import {Cursor} from "@luciad/ria/model/Cursor";
 import {GMLFeatureEncoder} from "./libs/GMLFeatureEncoder";
-import {WFSTOperationsKeys} from "./WFSCapabilitiesExtended";
+import {WFSCapabilitiesExtended, WFSCapabilitiesExtendedResult, WFSTOperationsKeys} from "./WFSCapabilitiesExtended";
 import {WFSTDelegateScreenHelper} from "./libs/screen/WFSTDelegateScreenHelper";
+import {ProgrammingError} from "@luciad/ria/error/ProgrammingError";
+import {getReference, isValidReferenceIdentifier, parseWellKnownText} from "@luciad/ria/reference/ReferenceProvider";
+import {WFSCapabilitiesFeatureType} from "@luciad/ria/model/capabilities/WFSCapabilitiesFeatureType";
+import {createTransformation} from "@luciad/ria/transformation/TransformationFactory";
+import {GMLCodec} from "@luciad/ria/model/codec/GMLCodec";
+import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
+import {WFSCapabilitiesFromUrlOptions} from "@luciad/ria/model/capabilities/WFSCapabilities";
+import {QueryOptions} from "@luciad/ria/model/store/Store";
 
 export interface WFSEditedFeature {id: string,  feature: string, onlyProperties?: boolean}
 
@@ -51,12 +62,12 @@ export interface WFSTFeatureStoreConstructorOptions extends WFSFeatureStoreConst
     wfst: WFSTOperationsKeys;
 }
 
-
 interface FetchSettingsOptions {
     method?: string;
     body?: BodyInit | null;
     headers?: HttpRequestHeaders;
 }
+
 export class WFSTFeatureStore extends WFSFeatureStore {
     private _wfst: WFSTOperationsKeys;
     private featureTemplate: WFSFeatureDescription;
@@ -74,6 +85,60 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         this.delegateScreen = new WFSTDelegateScreenHelper();
         this.invertAxes = !!options.swapAxes;
     }
+
+    public wfstCapable(): boolean {
+        return !!(this._wfst && this._wfst.Transaction);
+    }
+
+    public static async createFromURL_WFST(url, typeName: string, options?: WFSFeatureStoreCreateOptions & WFSCapabilitiesFromUrlOptions) {
+        const s = await WFSCapabilitiesExtended.fromURL(url, options);
+        return WFSTFeatureStore.createFromCapabilities_WFST(s, typeName, options);
+    }
+
+    public static createFromCapabilities_WFST(extended: WFSCapabilitiesExtendedResult, typeName:string, options: WFSFeatureStoreCreateOptions = {}) {
+        const e = extended.wfsCapabilities;
+        const wfst = extended.wfstCapabilities.WFSTOperations;
+        const match = e.featureTypes.filter((e => e.name === typeName))[0];
+        if (typeof match === "undefined") throw new ProgrammingError(`there is no feature type "${typeName}" in capabilities`);
+        const {reference: i, srsName: o} = getReferenceForWFS(match, options.reference);
+        const n = e.operations.filter((e => "GetFeature" === e.name))[0].supportedRequests;
+        let a = "";
+        let u = "";
+        const c = [];
+        n.forEach((e => {
+            const r = processServiceUrl(e.url);
+            if ("GET" === e.method) a = r; else if ("POST" === e.method) u = r;
+            c.push(e.method)
+        }));
+        if (typeof options.serviceURL === "string") {
+            a = options.serviceURL;
+            u = options.serviceURL
+        } else if (options.serviceURL) {
+            if (typeof options.serviceURL.GET === "string") a = options.serviceURL.GET;
+            if (typeof options.serviceURL.POST === "string") u = options.serviceURL.POST
+        }
+        const p = options.versions || [e.version];
+        const f = options.outputFormat || getOutputFormat(p, match.outputFormats);
+        const m = {
+            typeName: match.name,
+            serviceURL: a,
+            postServiceURL: u,
+            reference: i,
+            srsName: o,
+            codec: options.codec,
+            outputFormat: f,
+            versions: p,
+            methods: mergeRequestMethods(c, options.methods),
+            credentials: options.credentials,
+            requestHeaders: options.requestHeaders,
+            swapAxes: options.swapAxes,
+            geometryName: options.geometryName,
+            requestParameters: options.requestParameters,
+            bounds: getModelBoundsFromCapabilities(match, i)
+        };
+        return new WFSTFeatureStore({...m, wfst})
+    }
+
 
     putProperties(feature: Feature): Promise<FeatureId> {
         return new Promise<FeatureId>((resolve)=>{
@@ -270,6 +335,10 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 })
             }
         })
+    }
+
+    query(query?: WFSQueryOptions, options?: QueryOptions): Promise<Cursor<Feature>> {
+        return super.query(query, options);
     }
 
     queryByRids(rids: string[]): Promise<Cursor<Feature>> {
@@ -618,3 +687,91 @@ export class WFSTFeatureStore extends WFSFeatureStore {
 }
 
 
+function getReferenceForWFS(e: WFSCapabilitiesFeatureType, r): any {
+    const t = getDataReference(e.defaultReference);
+    if (t && !r) return {reference: t, srsName: e.defaultReference};
+    if (r) {
+        if (t && t.equals(r)) return {reference: t, srsName: e.defaultReference};
+        const s = getOtherReferenceFromCapabilities(e.otherReferences, r);
+        if (s) return s;
+        console.warn(`WFSFeature: User reference '${r.identifier}' is not supported by WFS service`);
+        return {reference: r}
+    }
+    const s = getOtherReferenceFromCapabilities(e.otherReferences, undefined);
+    if (s) return s;
+    throw new ProgrammingError("WFSFeature: No reference from WFS capabilities is supported")
+}
+
+function getDataReference(e) {
+    if (isValidReferenceIdentifier(e)) return getReference(e);
+    try {
+        return parseWellKnownText(e)
+    } catch (r) {
+        console.warn(`WFSFeatureStore: reference unsupported: ${e}`)
+    }
+}
+
+function getOtherReferenceFromCapabilities(e, r) {
+    for (let t = 0; t < e.length; t++) {
+        const s = e[t];
+        const i = getDataReference(s);
+        if (i) {
+            if (!r) return {reference: i, srsName: s};
+            if (r.equals(i)) return {reference: r, srsName: s}
+        }
+    }
+}
+
+const FORMATS = {json: [RegExp("json", "i")], gml: [RegExp("gml", "i"), RegExp("text/xml", "i")]};
+
+function hasFormatType(e, t) {
+    return t.some((t => e.some((e => e.test(t)))))
+}
+
+function getOutputType(e = []) {
+    if (e.length > 0) {
+        if (hasFormatType(FORMATS.json, e)) return "json";
+        if (hasFormatType(FORMATS.gml, e)) return "gml"
+    }
+    return "json"
+}
+
+function getFirstFormatOfType(e, t) {
+    return e.find((e => FORMATS[t].some((t => t.test(e)))))
+}
+
+const DEFAULT_OUTPUT_GML_WFS_1 = "text/xml; subtype=gml/3.1.1";
+const DEFAULT_OUTPUT_GML_WFS_2 = "application/gml+xml; version=3.2";
+const DEFAULT_OUTPUT_JSON = "application/json";
+
+function getOutputFormat(e, t = []) {
+    const o = undefined;
+    if ("json" === getOutputType(t)) return t.includes(DEFAULT_OUTPUT_JSON) ? DEFAULT_OUTPUT_JSON : getFirstFormatOfType(t, "json") ?? DEFAULT_OUTPUT_JSON;
+    if (e.some((e => e === WFSVersion.V202 || e === WFSVersion.V200)) && t.includes(DEFAULT_OUTPUT_GML_WFS_2)) return DEFAULT_OUTPUT_GML_WFS_2;
+    if (e.some((e => e === WFSVersion.V110 || e === WFSVersion.V100)) && t.includes(DEFAULT_OUTPUT_GML_WFS_1)) return DEFAULT_OUTPUT_GML_WFS_1;
+    return getFirstFormatOfType(t, "gml") ?? DEFAULT_OUTPUT_GML_WFS_2
+}
+
+function getAutoDetectedCodec(e) {
+    const t = undefined;
+    return "gml" === getOutputType(e ? [e] : []) ? new GMLCodec : new GeoJsonCodec
+}
+
+function mergeRequestMethods(e, t) {
+    if (!t || !Array.isArray(t) || !t.length) return e;
+    const o = e.filter((e => t.indexOf(e) > -1));
+    if (0 === o.length) {
+        console.warn(`WFS service does not support request methods: ${t.join(", ")}`);
+        return e
+    }
+    return o
+}
+
+function getModelBoundsFromCapabilities(e, r) {
+    const t = e.getWGS84Bounds()[0];
+    if (t?.reference) return createTransformation(t.reference, r).transformBounds(t)
+}
+
+function processServiceUrl(e) {
+    return "?" === e[e.length - 1] ? e.substring(0, e.length - 1) : e
+}

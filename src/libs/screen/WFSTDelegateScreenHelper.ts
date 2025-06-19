@@ -4,7 +4,7 @@ import {WFSTFeatureLockStore} from "../../WFSTFeatureLockStore";
 
 
 export class WFSTDelegateScreenHelper {
-    public EditNewFeatureProperties (feature: Feature, store: WFSTFeatureStore | WFSTFeatureLockStore) {
+    public EditNewFeatureProperties (feature: Feature, store: WFSTFeatureStore | WFSTFeatureLockStore, newFeature=true) {
         // const editFeaturePropertiesForm = <EditNewFeaturePropertiesJSONSchemaForm feature={feature} store={store} newFeature={true}/>;
         // ScreenPanel.createLeftPanelForm(editFeaturePropertiesForm);
     }
