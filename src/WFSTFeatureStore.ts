@@ -168,8 +168,8 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                                 resolve(null);
                             } else {
                                 //  Workaround was removed
-                                frozenFeature.id = resourceId;
-                                eventSupport.emit("StoreChanged", "update", frozenFeature, resourceId);
+                                if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
+                                eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
                                 resolve(feature.id);
                                 this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
                             }
@@ -221,8 +221,8 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                                      resolve(null);
                                  } else {
                                      // Workaround removed
-                                     frozenFeature.id = resourceId;
-                                     eventSupport.emit("StoreChanged", "update", frozenFeature, resourceId);
+                                     if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
+                                     eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
                                      resolve(feature.id);
                                      this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
                                  }
