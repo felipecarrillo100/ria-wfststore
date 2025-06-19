@@ -24,8 +24,6 @@ import {ProgrammingError} from "@luciad/ria/error/ProgrammingError";
 import {getReference, isValidReferenceIdentifier, parseWellKnownText} from "@luciad/ria/reference/ReferenceProvider";
 import {WFSCapabilitiesFeatureType} from "@luciad/ria/model/capabilities/WFSCapabilitiesFeatureType";
 import {createTransformation} from "@luciad/ria/transformation/TransformationFactory";
-import {GMLCodec} from "@luciad/ria/model/codec/GMLCodec";
-import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {WFSCapabilitiesFromUrlOptions} from "@luciad/ria/model/capabilities/WFSCapabilities";
 import {QueryOptions} from "@luciad/ria/model/store/Store";
 
@@ -735,7 +733,6 @@ const DEFAULT_OUTPUT_GML_WFS_2 = "application/gml+xml; version=3.2";
 const DEFAULT_OUTPUT_JSON = "application/json";
 
 function getOutputFormat(e, t = []) {
-    const o = undefined;
     if ("json" === getOutputType(t)) return t.includes(DEFAULT_OUTPUT_JSON) ? DEFAULT_OUTPUT_JSON : getFirstFormatOfType(t, "json") ?? DEFAULT_OUTPUT_JSON;
     if (e.some((e => e === WFSVersion.V202 || e === WFSVersion.V200)) && t.includes(DEFAULT_OUTPUT_GML_WFS_2)) return DEFAULT_OUTPUT_GML_WFS_2;
     if (e.some((e => e === WFSVersion.V110 || e === WFSVersion.V100)) && t.includes(DEFAULT_OUTPUT_GML_WFS_1)) return DEFAULT_OUTPUT_GML_WFS_1;
