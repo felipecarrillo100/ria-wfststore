@@ -4,7 +4,7 @@ import {WFSTFeatureLockStore} from "../../WFSTFeatureLockStore";
 
 
 export class WFSTDelegateScreenHelper {
-    public EditNewFeatureProperties (feature: Feature, store: WFSTFeatureStore | WFSTFeatureLockStore, newFeature=true) {
+    public EditNewFeatureProperties (_feature: Feature, _store: WFSTFeatureStore | WFSTFeatureLockStore, _newFeature=true) {
         // const editFeaturePropertiesForm = <EditNewFeaturePropertiesJSONSchemaForm feature={feature} store={store} newFeature={true}/>;
         // ScreenPanel.createLeftPanelForm(editFeaturePropertiesForm);
     }
@@ -13,15 +13,15 @@ export class WFSTDelegateScreenHelper {
         return `${title}\r\n${points.map((e) => e)}`;
     }
 
-    public confirmGeometryUpdate(onOK: ()=>void, onCancel?:()=>void) {
+    public confirmGeometryUpdate(onOK: ()=>void, _onCancel?:()=>void) {
         onOK();
     }
 
-    public confirmFeatureDelete(onOK: ()=>void, onCancel?:()=>void) {
+    public confirmFeatureDelete(onOK: ()=>void, _onCancel?:()=>void) {
         onOK();
     }
 
-    public confirmSelectedFeaturesDelete(onOK: ()=>void, onCancel?:()=>void) {
+    public confirmSelectedFeaturesDelete(onOK: ()=>void, _onCancel?:()=>void) {
         onOK();
     }
 
