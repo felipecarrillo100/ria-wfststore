@@ -329,6 +329,19 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         return super.query(query, options);
     }
 
+    // Get method
+    get(id: string | number, options: any): Promise<Feature> {
+        return new Promise<Feature>((resolve, reject)=> {
+            this.queryByRids([id as string]).then((cursor: Cursor<Feature>) => {
+                if (cursor.hasNext()) {
+                    resolve(cursor.next());
+                } else {
+                    reject();
+                }
+            }).catch(reject)
+        })
+    }
+
     queryByRids(rids: string[]): Promise<Cursor<Feature>> {
         return new Promise<Cursor<Feature>>((resolve)=>{
             const {typeName, urlEndpoint} = this.extractUtils();
