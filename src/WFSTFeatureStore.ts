@@ -6,7 +6,6 @@ import { Feature, FeatureId } from "@luciad/ria/model/feature/Feature";
 import { Handle } from "@luciad/ria/util/Evented";
 import { EventedSupport } from "@luciad/ria/util/EventedSupport";
 import { areCompatibleGeometries, parseWFSFeatureDescription, standardizeProperties, WFSFeatureDescription } from "./libs/ParseWFSFeatureDescription";
-import { HttpRequestHeaders } from "@luciad/ria/util/HttpRequestOptions";
 import { WFSTProtocol } from "./libs/WFSTProtocol";
 import { WFSVersion } from "@luciad/ria/ogc/WFSVersion";
 import { CoordinateReference } from "@luciad/ria/reference/CoordinateReference";
@@ -57,11 +56,7 @@ export interface WFSTFeatureStoreConstructorOptions extends WFSFeatureStoreConst
     postServiceURL?: string;
 }
 
-interface FetchSettingsOptions {
-    method?: string;
-    body?: BodyInit | null;
-    headers?: HttpRequestHeaders;
-}
+
 
 export class WFSTFeatureStore extends WFSFeatureStore {
     private _wfst: WFSTOperationsKeys;

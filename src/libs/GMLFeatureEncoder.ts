@@ -3,7 +3,7 @@ import { GeoJsonCodec } from "@luciad/ria/model/codec/GeoJsonCodec";
 import { MemoryStore } from "@luciad/ria/model/store/MemoryStore";
 import { encodeFeatureToGML, GMLFeature } from "./gml/gml32/encodeFeatureToGML";
 import { GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry } from "./ParseWFSFeatureDescription";
-import { GMLGeometry, GMLGeometryTypeNames } from "./gml/gml32/GMLGeometry";
+import { GMLGeometry } from "./gml/gml32/GMLGeometry";
 
 const geoJSONCodec = new GeoJsonCodec({ generateIDs: true });
 const geoJSONCodecPreserveIds = new GeoJsonCodec({ generateIDs: false });
