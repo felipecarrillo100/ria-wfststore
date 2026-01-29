@@ -83,7 +83,7 @@ describe('WFSTFeatureStore ', () => {
     });
 
     it('WFSTFeatureStore.putProperties', async () => {
-        const { store, reference } = await CreateGeoserverStore("luciad:europe_untouched");
+        const { store } = await CreateGeoserverStore("luciad:europe_untouched");
         if (newFeature) {
             const shape = createPoint(newFeature.shape.reference, [0, 0]);
             const updatedFeature = new Feature(shape, { ...newFeature.properties, country: "Carthage" }, targetID);
@@ -120,7 +120,7 @@ describe('WFSTFeatureStore ', () => {
     });
 
     it('WFSTFeatureStore.remove', async () => {
-        const { store, reference } = await CreateGeoserverStore("luciad:europe_untouched");
+        const { store } = await CreateGeoserverStore("luciad:europe_untouched");
 
         return store.remove(targetID).then(result => {
             expect(result).toBe(true);

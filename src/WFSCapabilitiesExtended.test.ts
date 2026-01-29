@@ -5,7 +5,7 @@ import { WFSCapabilitiesExtended, WFSCapabilitiesExtendedResult } from "./WFSCap
 describe('OgcOpenApiGetCapabilities', () => {
 
     it('OgcOpenApiGetCapabilities.fromURL leu-gsp-vrndp06:8080/geoserver', async () => {
-        return WFSCapabilitiesExtended.fromURL("http://leu-gsp-vrndp06.ingrnet.com:8080/geoserver/ows").then(({ wfsCapabilities, wfstCapabilities }: WFSCapabilitiesExtendedResult) => {
+        return WFSCapabilitiesExtended.fromURL("http://leu-gsp-vrndp06.ingrnet.com:8080/geoserver/ows").then(({ wfstCapabilities }: WFSCapabilitiesExtendedResult) => {
             // testing geoserver
             expect(wfstCapabilities.WFSTCapable).toBe(true);
         }, () => {
@@ -14,7 +14,7 @@ describe('OgcOpenApiGetCapabilities', () => {
     });
 
     it('OgcOpenApiGetCapabilities.fromURL leu-gsp-vrndp06:8080/geoserver', async () => {
-        return WFSCapabilitiesExtended.fromURL("http://leu-gsp-vrndp06.ingrnet.com:8080/geoserver/ows").then(({ wfsCapabilities, wfstCapabilities }: WFSCapabilitiesExtendedResult) => {
+        return WFSCapabilitiesExtended.fromURL("http://leu-gsp-vrndp06.ingrnet.com:8080/geoserver/ows").then(({ wfstCapabilities }: WFSCapabilitiesExtendedResult) => {
             // testing geoserver
             const expected = {
                 "LockFeature": {},
@@ -28,7 +28,7 @@ describe('OgcOpenApiGetCapabilities', () => {
     });
 
     it('OgcOpenApiGetCapabilities.fromURL sampleservices.luciad.com/wfs', async () => {
-        return WFSCapabilitiesExtended.fromURL("https://sampleservices.luciad.com/wfs").then(({ wfsCapabilities, wfstCapabilities }: WFSCapabilitiesExtendedResult) => {
+        return WFSCapabilitiesExtended.fromURL("https://sampleservices.luciad.com/wfs").then(({ wfstCapabilities }: WFSCapabilitiesExtendedResult) => {
             // testing sampleservices
             expect(wfstCapabilities.WFSTCapable).toBe(false);
         }, () => {

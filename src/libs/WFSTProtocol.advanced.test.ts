@@ -3,7 +3,6 @@ import { WFSTProtocol } from './WFSTProtocol';
 import { Feature } from '@luciad/ria/model/feature/Feature';
 import { createPoint, createPolygon } from '@luciad/ria/shape/ShapeFactory';
 import { getReference } from '@luciad/ria/reference/ReferenceProvider';
-import { PointCoordinates } from "@luciad/ria/shape/PointCoordinate";
 
 describe('WFSTProtocol Advanced Tests', () => {
 
