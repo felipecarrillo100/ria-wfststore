@@ -1,95 +1,102 @@
-import {create} from 'xmlbuilder2';
-import {XMLBuilder} from "xmlbuilder2/lib/interfaces";
-import {GMLGeometry} from "./GMLGeometry";
-import {getReference} from "@luciad/ria/reference/ReferenceProvider";
+import { create } from 'xmlbuilder2';
+import { XMLBuilder } from "xmlbuilder2/lib/interfaces";
+import { GMLGeometry } from "./GMLGeometry";
+import { getReference } from "@luciad/ria/reference/ReferenceProvider";
 
-// Function to encode geometries to GML 3.2 (or GML 3.1.1)
+/** Configuration for GML geometry encoding. */
 interface EncodeGeometryToGMLOptions {
+    /** Use gml:posList for coordinate sequences. Default is true. */
     usePosList?: boolean;
+    /** If provided, append to this XMLBuilder instance instead of creating a new document. */
     inDoc?: XMLBuilder;
-    invert?: boolean;       //  Rever lon /lat for user's request
-    nativeCrsSwapAxis?: boolean;  //  Rever lon /lat for user's request
+    /** Force axis inversion (lon/lat swap). */
+    invert?: boolean;
+    /** Pre-determined CRS swap requirement. If undefined, it will be calculated from SRS name. */
+    nativeCrsSwapAxis?: boolean;
+    /** Target GML version. */
     gmlVersion?: '3.2' | '3.1.1';
 }
 
-export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeometryToGMLOptions): string {
-    options = options || {};
+/**
+ * Encodes a geometry object into GML XML.
+ * Handles axis order based on CRS and optional user inversion.
+ */
+export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeometryToGMLOptions = {}): string {
     const doc = options.inDoc ? options.inDoc : create({ version: '1.0', encoding: 'UTF-8' });
-    // If we have already determined nativeCrsSwapAxis not need to calculate it again.
-    const swapAxisRequiredForThisProjection = typeof options.nativeCrsSwapAxis !== "undefined" ? options.nativeCrsSwapAxis : needsSwapAxis(geometry.srsName);
-    const usePosList = typeof options.usePosList !== "undefined" ? options.usePosList : true;
     const gmlVersion = options.gmlVersion || '3.2';
+    const usePosList = options.usePosList ?? true;
+
+    // Determine if the native CRS uses Lat/Long order
+    const swapAxisRequired = options.nativeCrsSwapAxis ?? needsSwapAxis(geometry.srsName);
 
     const hasToInvertAxis = () => {
-        // Force axis swap on user's request.
-        return options.invert ? !swapAxisRequiredForThisProjection : swapAxisRequiredForThisProjection;
+        // If user explicitly asks to invert, we XOR it with the native requirement
+        return options.invert ? !swapAxisRequired : swapAxisRequired;
     }
 
-    const GMLProperties = (geometry: GMLGeometry) => ({
-        'srsName': geometry.srsName
+    const gmlCommonProps = (geom: GMLGeometry) => ({
+        'srsName': geom.srsName
     });
 
-    const invertCoordinates = (coordinates: number[]) => {
-        if (hasToInvertAxis())  return `${coordinates[1]} ${coordinates[0]}`;
+    /** Formats coordinates based on axis order. */
+    const formatCoordinates = (coordinates: number[]) => {
+        if (hasToInvertAxis()) {
+            return `${coordinates[1]} ${coordinates[0]}`;
+        }
         return `${coordinates[0]} ${coordinates[1]}`;
     }
 
+    /** Creates a space-separated posList from an array of coordinates. */
     const createPosList = (coordinates: [number, number][]) => {
-        return coordinates.map(invertCoordinates).join(' ');
+        return coordinates.map(formatCoordinates).join(' ');
     }
-
 
     switch (geometry.type) {
         case 'Point': {
-            doc.ele('gml:Point', GMLProperties(geometry))
+            doc.ele('gml:Point', gmlCommonProps(geometry))
                 .ele('gml:pos')
-                .txt(invertCoordinates(geometry.coordinates))
+                .txt(formatCoordinates(geometry.coordinates))
                 .up();
             break;
         }
         case 'LineString': {
-            const lineStringElement = doc.ele('gml:LineString', GMLProperties(geometry));
+            const lineStringElement = doc.ele('gml:LineString', gmlCommonProps(geometry));
             if (usePosList) {
                 lineStringElement.ele('gml:posList').txt(createPosList(geometry.coordinates)).up();
             } else {
                 geometry.coordinates.forEach(coord => {
-                    lineStringElement.ele('gml:pos').txt(invertCoordinates(coord)).up();
+                    lineStringElement.ele('gml:pos').txt(formatCoordinates(coord)).up();
                 });
             }
             break;
         }
         case 'Polygon': {
-            const polygonElement = doc.ele('gml:Polygon', GMLProperties(geometry));
-
+            const polygonElement = doc.ele('gml:Polygon', gmlCommonProps(geometry));
             geometry.coordinates.forEach((ring, index) => {
                 const ringType = index === 0 ? 'gml:exterior' : 'gml:interior';
-                const linearRingElement = polygonElement.ele(ringType).ele('gml:LinearRing');
-
+                const linearRing = polygonElement.ele(ringType).ele('gml:LinearRing');
                 if (usePosList) {
-                    linearRingElement.ele('gml:posList').txt(createPosList(ring)).up();
+                    linearRing.ele('gml:posList').txt(createPosList(ring)).up();
                 } else {
                     ring.forEach(coord => {
-                        linearRingElement.ele('gml:pos').txt(invertCoordinates(coord)).up();
+                        linearRing.ele('gml:pos').txt(formatCoordinates(coord)).up();
                     });
                 }
             });
             break;
         }
         case 'MultiSurface': {
-            const multiPolygonElement = doc.ele('gml:MultiSurface', GMLProperties(geometry));
-
+            const multiSurface = doc.ele('gml:MultiSurface', gmlCommonProps(geometry));
             geometry.coordinates.forEach(polygon => {
-                const polygonMemberElement = multiPolygonElement.ele('gml:surfaceMember').ele('gml:Polygon');
-
+                const polygonNode = multiSurface.ele('gml:surfaceMember').ele('gml:Polygon');
                 polygon.forEach((ring, index) => {
                     const ringType = index === 0 ? 'gml:exterior' : 'gml:interior';
-                    const linearRingElement = polygonMemberElement.ele(ringType).ele('gml:LinearRing');
-
+                    const linearRing = polygonNode.ele(ringType).ele('gml:LinearRing');
                     if (usePosList) {
-                        linearRingElement.ele('gml:posList').txt(createPosList(ring)).up();
+                        linearRing.ele('gml:posList').txt(createPosList(ring)).up();
                     } else {
                         ring.forEach(coord => {
-                            linearRingElement.ele('gml:pos').txt(invertCoordinates(coord)).up();
+                            linearRing.ele('gml:pos').txt(formatCoordinates(coord)).up();
                         });
                     }
                 });
@@ -97,20 +104,17 @@ export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeomet
             break;
         }
         case 'MultiPolygon': {
-            const multiPolygonElement = doc.ele('gml:MultiPolygon', GMLProperties(geometry));
-
+            const multiPolygon = doc.ele('gml:MultiPolygon', gmlCommonProps(geometry));
             geometry.coordinates.forEach(polygon => {
-                const polygonMemberElement = multiPolygonElement.ele('gml:polygonMember').ele('gml:Polygon');
-
+                const polygonNode = multiPolygon.ele('gml:polygonMember').ele('gml:Polygon');
                 polygon.forEach((ring, index) => {
                     const ringType = index === 0 ? 'gml:exterior' : 'gml:interior';
-                    const linearRingElement = polygonMemberElement.ele(ringType).ele('gml:LinearRing');
-
+                    const linearRing = polygonNode.ele(ringType).ele('gml:LinearRing');
                     if (usePosList) {
-                        linearRingElement.ele('gml:posList').txt(createPosList(ring)).up();
+                        linearRing.ele('gml:posList').txt(createPosList(ring)).up();
                     } else {
                         ring.forEach(coord => {
-                            linearRingElement.ele('gml:pos').txt(invertCoordinates(coord)).up();
+                            linearRing.ele('gml:pos').txt(formatCoordinates(coord)).up();
                         });
                     }
                 });
@@ -118,48 +122,40 @@ export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeomet
             break;
         }
         case 'MultiPoint': {
-            const multiPointElement = doc.ele('gml:MultiPoint', GMLProperties(geometry));
-
+            const multiPoint = doc.ele('gml:MultiPoint', gmlCommonProps(geometry));
             geometry.coordinates.forEach(coord => {
-                multiPointElement.ele('gml:pointMember')
-                    .ele('gml:Point')
-                    .ele('gml:pos')
-                    .txt(invertCoordinates(coord))
-                    .up();
+                multiPoint.ele('gml:pointMember').ele('gml:Point').ele('gml:pos')
+                    .txt(formatCoordinates(coord)).up();
             });
             break;
         }
         case 'MultiCurve': {
-            const multiLineStringElement = doc.ele('gml:MultiCurve', GMLProperties(geometry));
-
+            const multiCurve = doc.ele('gml:MultiCurve', gmlCommonProps(geometry));
             geometry.coordinates.forEach(lineString => {
-                const lineStringMemberElement = multiLineStringElement.ele('gml:curveMember').ele('gml:LineString');
-
+                const lineStringNode = multiCurve.ele('gml:curveMember').ele('gml:LineString');
                 if (usePosList) {
-                    lineStringMemberElement.ele('gml:posList').txt(createPosList(lineString)).up();
+                    lineStringNode.ele('gml:posList').txt(createPosList(lineString)).up();
                 } else {
                     lineString.forEach(coord => {
-                        lineStringMemberElement.ele('gml:pos').txt(invertCoordinates(coord)).up();
+                        lineStringNode.ele('gml:pos').txt(formatCoordinates(coord)).up();
                     });
                 }
             });
             break;
         }
         case 'MultiLineString': {
-            const multiLineStringElement = gmlVersion === '3.1.1'
-                                           ? doc.ele('gml:MultiLineString', GMLProperties(geometry))
-                                           : doc.ele('gml:MultiCurve', GMLProperties(geometry));
+            const isV311 = gmlVersion === '3.1.1';
+            const multiLineString = isV311 ? doc.ele('gml:MultiLineString', gmlCommonProps(geometry))
+                : doc.ele('gml:MultiCurve', gmlCommonProps(geometry));
 
             geometry.coordinates.forEach(lineString => {
-                const lineStringMemberElement = multiLineStringElement.ele(
-                    gmlVersion === '3.1.1' ? 'gml:lineStringMember' : 'gml:curveMember'
-                ).ele('gml:LineString');
-
+                const memberTag = isV311 ? 'gml:lineStringMember' : 'gml:curveMember';
+                const lineStringNode = multiLineString.ele(memberTag).ele('gml:LineString');
                 if (usePosList) {
-                    lineStringMemberElement.ele('gml:posList').txt(createPosList(lineString)).up();
+                    lineStringNode.ele('gml:posList').txt(createPosList(lineString)).up();
                 } else {
                     lineString.forEach(coord => {
-                        lineStringMemberElement.ele('gml:pos').txt(invertCoordinates(coord)).up();
+                        lineStringNode.ele('gml:pos').txt(formatCoordinates(coord)).up();
                     });
                 }
             });
@@ -167,11 +163,10 @@ export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeomet
         }
         case 'MultiGeometry':
         case 'GeometryCollection': {
-            const multiGeometryElement = doc.ele('gml:MultiGeometry', GMLProperties(geometry));
-
-            geometry.geometries.forEach(subGeometry => {
-                const geometryMemberElement = multiGeometryElement.ele('gml:geometryMember');
-                encodeGeometryToGML(subGeometry, { inDoc: geometryMemberElement, invert: options.invert, nativeCrsSwapAxis: swapAxisRequiredForThisProjection, gmlVersion });
+            const multiGeom = doc.ele('gml:MultiGeometry', gmlCommonProps(geometry));
+            geometry.geometries.forEach(subGeom => {
+                const member = multiGeom.ele('gml:geometryMember');
+                encodeGeometryToGML(subGeom, { inDoc: member, invert: options.invert, nativeCrsSwapAxis: swapAxisRequired, gmlVersion });
             });
             break;
         }
@@ -182,33 +177,27 @@ export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeomet
     return doc.end({ prettyPrint: false });
 }
 
+/**
+ * Determines if a CRS (via URN) requires axis swapping (Latitude before Longitude).
+ */
+function needsSwapAxis(urn: string): boolean {
+    try {
+        const crs = getReference(urn);
+        const axis = crs.axisInformation;
+        const axis0 = axis[0].axis.abbreviation.toLowerCase();
+        const axis1 = axis[1].axis.abbreviation.toLowerCase();
 
-// Determines if swapping is required for this projection
-function needsSwapAxis(urn: string) {
-    const crs = getReference(urn);
-    const axis = crs.axisInformation;
-    const axis0 = axis[0].axis.abbreviation.toLowerCase();
-    const axis1 = axis[1].axis.abbreviation.toLowerCase();
+        const lonCandidates = ['lon', 'long', 'longitude', 'lng', 'e', 'x', 'easting', 'east'];
+        const latCandidates = ['lat', 'latitude', 'n', 'y', 'northing', 'north'];
 
-    // Possible longitude values:
-    const lonCandidates = [
-        'lon', 'long', 'longitude', 'lng',
-        'e', 'x', 'easting', 'east'
-    ];
-    // Possible latitude values:
-    const latCandidates = [
-        'lat', 'latitude',
-        'n', 'y', 'northing', 'north'
-    ];
+        const isLon = (name: string) => lonCandidates.includes(name);
+        const isLat = (name: string) => latCandidates.includes(name);
 
-    const isLon = (axis: string) => lonCandidates.includes(axis);
-    const isLat = (axis: string) => latCandidates.includes(axis);
-
-    let status  = 'unknown';
-    if (isLon(axis0) && isLat(axis1)) {
-        status = 'longlat';
-    } else if (isLat(axis0) && isLon(axis1)) {
-        status = 'latlong';
+        if (isLat(axis0) && isLon(axis1)) {
+            return true; // Lat/Long order
+        }
+    } catch {
+        // Fallback or unknown
     }
-    return status === 'latlong';
+    return false;
 }

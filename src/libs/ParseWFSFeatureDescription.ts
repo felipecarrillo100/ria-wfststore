@@ -1,8 +1,6 @@
-// Define a type for the extracted element information
+import { Feature } from "@luciad/ria/model/feature/Feature";
 
-// Define a mapping from XSD types to JSON types
-import {Feature} from "@luciad/ria/model/feature/Feature";
-
+/** Supported GeoJSON geometry types. */
 export type GeoJSONGeometryType =
     "Point" |
     "LineString" |
@@ -12,7 +10,9 @@ export type GeoJSONGeometryType =
     "MultiPolygon" |
     "GeometryCollection";
 
+/** Supported XSD types mapped to standard JSON types. */
 export type BasicJSONSchema7TypeName = "string" | "number" | "boolean";
+
 export const xsdToJsonMap: { [key: string]: BasicJSONSchema7TypeName } = {
     // String mappings
     "xsd:string": "string",
@@ -52,11 +52,13 @@ export const xsdToJsonMap: { [key: string]: BasicJSONSchema7TypeName } = {
     // Boolean mappings
     "xsd:boolean": "boolean"
 };
+
 export type XSDTypeKey = keyof typeof xsdToJsonMap;
 
+/** Supported GML geometry property names. */
 export type GMLGeometryNames = "Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString" | "MultiPolygon" | "Geometry" | "MultiGeometry" | "MultiSurface" | "MultiCurve";
+
 const gmlToJSONGeometry: { [key: string]: GMLGeometryNames } = {
-    // String mappings
     "gml:PointPropertyType": "Point",
     "gml:LineStringPropertyType": "LineString",
     "gml:PolygonPropertyType": "Polygon",
@@ -66,31 +68,35 @@ const gmlToJSONGeometry: { [key: string]: GMLGeometryNames } = {
     "gml:GeometryPropertyType": "Geometry",
     "gml:MultiGeometryPropertyType": "MultiGeometry",
     "gml:MultiCurvePropertyType": "MultiCurve",
-    // Added for geoserver
     "gml:MultiSurfacePropertyType": "MultiSurface",
-}
-export type GMLGeometryTypeKey = keyof typeof xsdToJsonMap;
+};
 
-export function GMLGeometryTypeToGeometry(key: GMLGeometryTypeKey) {
-    if (typeof gmlToJSONGeometry[key] !== "undefined") return gmlToJSONGeometry[key] as GMLGeometryNames;
-    throw new Error('Unsupported target geometry type');
+export type GMLGeometryTypeKey = string;
+
+/**
+ * Maps a GML property type name (e.g., gml:PointPropertyType) to a simplified geometry name.
+ */
+export function GMLGeometryTypeToGeometry(key: GMLGeometryTypeKey): GMLGeometryNames {
+    if (typeof gmlToJSONGeometry[key] !== "undefined") {
+        return gmlToJSONGeometry[key] as GMLGeometryNames;
+    }
+    throw new Error(`Unsupported target geometry type: ${key}`);
 }
 
+/** Information about an XSD element extracted from DescribeFeatureType. */
 export interface XsdElement {
     name?: string;
-    type?: XSDTypeKey;
+    type?: string;
     minOccurs?: number;
     substitutionGroup?: string;
 }
 
-interface XsdGeometryElement {
-    name?: string;
+/** Specific information for a geometry element. */
+interface XsdGeometryElement extends XsdElement {
     type?: GMLGeometryTypeKey;
-    minOccurs?: number;
-    substitutionGroup?: string;
 }
 
-
+/** Result of parsing a WFS DescribeFeatureType response. */
 export interface WFSFeatureDescription {
     geometry: XsdGeometryElement;
     properties: XsdElement[];
@@ -99,27 +105,19 @@ export interface WFSFeatureDescription {
     shortTns: string;
 }
 
+/**
+ * Parses WFS DescribeFeatureType XML into a structured feature description.
+ */
 export function parseWFSFeatureDescription(xmlContent: string): WFSFeatureDescription {
-    // Create a new DOMParser instance
     const parser = new DOMParser();
-
-    // Parse the XML content
     const xmlDoc = parser.parseFromString(xmlContent, "application/xml");
     const schemaElement = xmlDoc.documentElement;
     const targetNamespace = schemaElement.getAttribute("targetNamespace");
 
-    // Find the xsd:extension element with base="gml:AbstractFeatureType"
-    const extensions = xmlDoc.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", "extension");
-    let targetExtension: Element | null = null;
+    const w3cxsd = "http://www.w3.org/2001/XMLSchema";
+    const extensions = Array.from(xmlDoc.getElementsByTagNameNS(w3cxsd, "extension"));
+    const targetExtension = extensions.find(e => e.getAttribute("base") === "gml:AbstractFeatureType");
 
-    for (const extension of extensions) {
-        if (extension.getAttribute("base") === "gml:AbstractFeatureType") {
-            targetExtension = extension;
-            break;
-        }
-    }
-
-    // If the target extension is not found, return an empty array
     if (!targetExtension) {
         return {
             geometry: null,
@@ -130,72 +128,51 @@ export function parseWFSFeatureDescription(xmlContent: string): WFSFeatureDescri
         };
     }
 
-    // Get all xsd:element elements within the target extension
-    const sequence = targetExtension.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", "sequence")[0];
-    const elements = sequence.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", "element");
+    const sequence = targetExtension.getElementsByTagNameNS(w3cxsd, "sequence")[0];
+    const elements = sequence ? Array.from(sequence.getElementsByTagNameNS(w3cxsd, "element")) : [];
 
-    const result: XsdElement[] = [];
+    const extractedElements: XsdElement[] = elements.map(element => ({
+        name: element.getAttribute("name") || undefined,
+        type: element.getAttribute("type") || undefined,
+        minOccurs: element.hasAttribute("minOccurs") ? Number(element.getAttribute("minOccurs")) : undefined,
+        substitutionGroup: element.getAttribute("substitutionGroup") || undefined
+    }));
 
-    // Iterate through each element and extract relevant attributes
-    for (const element of elements) {
-        const elementObj: XsdElement = {};
-        // Extract attributes
-        if (element.hasAttribute("name")) {
-            elementObj.name = element.getAttribute("name");
-        }
-        if (element.hasAttribute("type")) {
-            elementObj.type = element.getAttribute("type");
-        }
-        if (element.hasAttribute("minOccurs")) {
-            elementObj.minOccurs = Number(element.getAttribute("minOccurs"));
-        }
-        if (element.hasAttribute("substitutionGroup")) {
-            elementObj.substitutionGroup = element.getAttribute("substitutionGroup");
-        }
+    // Identify geometry and properties based on type prefix
+    const geometry = extractedElements.filter(e => e.type?.startsWith("gml:")) as XsdGeometryElement[];
+    const properties = extractedElements.filter(e => e.type?.startsWith("xsd:"));
 
-        result.push(elementObj);
-    }
+    // Find the feature type definition itself
+    const rootElements = Array.from(xmlDoc.getElementsByTagNameNS(w3cxsd, "element"));
+    const featureRoot = rootElements.find(e => e.getAttribute("substitutionGroup") === "gml:AbstractFeature");
 
-    // Filter geometry and properties
-    const geometry = result.filter(e => typeof e.type === "string" && (e.type as string).startsWith("gml:")) as XsdGeometryElement[];
-    const properties = result.filter(e => typeof e.type === "string" && (e.type as string).startsWith("xsd:"));
+    const feature: XsdElement = featureRoot ? {
+        name: featureRoot.getAttribute("name") || undefined,
+        type: featureRoot.getAttribute("type") || undefined,
+        minOccurs: featureRoot.hasAttribute("minOccurs") ? Number(featureRoot.getAttribute("minOccurs")) : undefined,
+        substitutionGroup: featureRoot.getAttribute("substitutionGroup") || undefined
+    } : null;
 
-    // Find elements with substitutionGroup="gml:AbstractFeature"
-    const abstractFeatureElements = Array.from(xmlDoc.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", "element"))
-        .filter(e => e.getAttribute("substitutionGroup") === "gml:AbstractFeature")
-        .map(e => {
-            const elementObj: XsdElement = {};
-            if (e.hasAttribute("name")) {
-                elementObj.name = e.getAttribute("name");
-            }
-            if (e.hasAttribute("type")) {
-                elementObj.type = e.getAttribute("type");
-            }
-            if (e.hasAttribute("minOccurs")) {
-                elementObj.minOccurs = Number(e.getAttribute("minOccurs"));
-            }
-            if (e.hasAttribute("substitutionGroup")) {
-                elementObj.substitutionGroup = e.getAttribute("substitutionGroup");
-            }
-            return elementObj;
-        });
+    const shortTns = feature && feature.type ? feature.type.split(":")[0] : null;
 
-    const feature = abstractFeatureElements[0] || null;
-    const shortTns = feature && typeof feature.type === "string" ? (feature.type as string).split(":")[0] : null;
     return {
         geometry: geometry[0] || null,
         properties,
-        feature: abstractFeatureElements[0] || null,
+        feature,
         tns: targetNamespace || null,
         shortTns
     };
 }
 
-
+/**
+ * Creates an empty properties object based on the feature description.
+ */
 export function populateFeatureProperties(featureDescription: WFSFeatureDescription) {
-    const properties = {} as any;
+    const properties: Record<string, any> = {};
     for (const property of featureDescription.properties) {
-        switch (mapXsdTypeToJsonType(property.type)) {
+        if (!property.name) continue;
+
+        switch (mapXsdTypeToJsonType(property.type as XSDTypeKey)) {
             case "string":
                 properties[property.name] = "";
                 break;
@@ -212,58 +189,64 @@ export function populateFeatureProperties(featureDescription: WFSFeatureDescript
     return properties;
 }
 
-function setProperVariableType(featureTemplate: WFSFeatureDescription, properties: {[key:string]: any}, key: string) {
-    const element = featureTemplate.properties.find(p=>p.name===key);
+/**
+ * Sets the value of a property ensuring it matches the expected XSD type.
+ */
+function setProperVariableType(featureTemplate: WFSFeatureDescription, properties: Record<string, any>, key: string) {
+    const element = featureTemplate.properties.find(p => p.name === key);
     const value = properties[key];
     if (!element) return value;
-    const jsonSchemaType = mapXsdTypeToJsonType(element.type);
+
+    const jsonSchemaType = mapXsdTypeToJsonType(element.type as XSDTypeKey);
     switch (jsonSchemaType) {
         case "string":
-            return typeof value !== "undefined" ? `${value}` : value;
+            return value !== undefined ? `${value}` : value;
         case "number":
-            return typeof value !== "undefined" ? Number(value) : value;
+            return value !== undefined ? Number(value) : value;
         case "boolean":
-            return typeof value !== "undefined" ? Boolean(value) : value
+            return value !== undefined ? Boolean(value) : value;
         default:
             return value;
     }
 }
 
+/**
+ * Standardizes a feature's properties according to the WFS feature description.
+ */
 export function standardizeProperties(featureTemplate: WFSFeatureDescription, feature: Feature) {
-    let newFeature;
+    const templateProperties = populateFeatureProperties(featureTemplate);
+    const newProperties: Record<string, any> = {};
     let validProperties = true;
-    const properties = populateFeatureProperties(featureTemplate);
+
     if (Object.keys(feature.properties).length === 0) {
-        newFeature = new Feature(feature.shape, properties, feature.id);
         validProperties = false;
-    } else {
-        for (const key in properties) {
-            if (properties.hasOwnProperty(key)) {
-                if (typeof feature.properties[key] !== "undefined") {
-                    properties[key] = setProperVariableType(featureTemplate, feature.properties, key);
-                } else {
-                    validProperties = false;
-                }
-            }
-        }
-        newFeature = new Feature(feature.shape, properties, feature.id);
+        return { newFeature: new Feature(feature.shape, templateProperties, feature.id), validProperties };
     }
+
+    for (const key in templateProperties) {
+        if (feature.properties[key] !== undefined) {
+            newProperties[key] = setProperVariableType(featureTemplate, feature.properties, key);
+        } else {
+            newProperties[key] = templateProperties[key];
+            validProperties = false;
+        }
+    }
+
     return {
-        newFeature,
+        newFeature: new Feature(feature.shape, newProperties, feature.id),
         validProperties
     };
 }
 
-
-
 function mapXsdTypeToJsonType(xsdType: XSDTypeKey): string {
-    // Return the mapped JSON type or 'unknown' if not found
     return xsdToJsonMap[xsdType] || "unknown";
 }
 
+/**
+ * Checks if a GeoJSON geometry type is compatible with a GML geometry property type.
+ */
 export function areCompatibleGeometries(geoJSONType: GeoJSONGeometryType, gmlTypeKey: GMLGeometryTypeKey): boolean {
-    // Define compatibility rules
-    const compatibilityMap: { [key in GeoJSONGeometryType]: GMLGeometryNames[] } = {
+    const compatibilityMap: Record<GeoJSONGeometryType, GMLGeometryNames[]> = {
         "Point": ["Point", "MultiPoint", "Geometry", "MultiGeometry"],
         "LineString": ["LineString", "MultiLineString", "MultiCurve", "Geometry", "MultiGeometry"],
         "Polygon": ["Polygon", "MultiPolygon", "MultiSurface", "Geometry", "MultiGeometry"],
@@ -273,9 +256,10 @@ export function areCompatibleGeometries(geoJSONType: GeoJSONGeometryType, gmlTyp
         "GeometryCollection": ["MultiGeometry", "Geometry"],
     };
 
-    // Get the GML geometry name from the key
-    const gmlGeometryName = gmlToJSONGeometry[gmlTypeKey];
-
-    // Check if the GeoJSON type is compatible with the GML type
-    return compatibilityMap[geoJSONType].includes(gmlGeometryName);
+    try {
+        const gmlGeometryName = GMLGeometryTypeToGeometry(gmlTypeKey);
+        return compatibilityMap[geoJSONType].includes(gmlGeometryName);
+    } catch {
+        return false;
+    }
 }

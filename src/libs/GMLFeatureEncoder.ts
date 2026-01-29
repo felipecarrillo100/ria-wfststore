@@ -1,18 +1,19 @@
-import {Feature} from "@luciad/ria/model/feature/Feature";
-import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
-import {MemoryStore} from "@luciad/ria/model/store/MemoryStore";
-import {encodeFeatureToGML, GMLFeature} from "./gml/gml32/encodeFeatureToGML";
-import {GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry} from "./ParseWFSFeatureDescription";
-import {GMLGeometry, GMLGeometryTypeNames} from "./gml/gml32/GMLGeometry";
+import { Feature } from "@luciad/ria/model/feature/Feature";
+import { GeoJsonCodec } from "@luciad/ria/model/codec/GeoJsonCodec";
+import { MemoryStore } from "@luciad/ria/model/store/MemoryStore";
+import { encodeFeatureToGML, GMLFeature } from "./gml/gml32/encodeFeatureToGML";
+import { GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry } from "./ParseWFSFeatureDescription";
+import { GMLGeometry, GMLGeometryTypeNames } from "./gml/gml32/GMLGeometry";
 
-const geoJSONCodec = new GeoJsonCodec({generateIDs: true});
-const geoJSONCodecPreserveIds = new GeoJsonCodec({generateIDs: false});
+const geoJSONCodec = new GeoJsonCodec({ generateIDs: true });
+const geoJSONCodecPreserveIds = new GeoJsonCodec({ generateIDs: false });
 
 interface GeometryMapType {
     GeometryCollection?: string;
     MultiPolygon?: string;
 }
 
+/** Options for GML encoding. */
 interface GMLEncoderOptions {
     geometryMap?: GeometryMapType;
     wrapToMultiGeometry?: boolean;
@@ -24,10 +25,14 @@ interface GMLEncoderOptions {
     invert?: boolean;
 }
 
-
-const ReplaceMapGeometries = {
+const DefaultReplaceMap = {
     GeometryCollection: "MultiGeometry",
-}
+};
+
+/**
+ * Handles encoding of Features into GML representations.
+ * Manages geometry wrapping (e.g., Polygon -> MultiSurface) as required by WFS target types.
+ */
 export class GMLFeatureEncoder {
     private geometryMap: GeometryMapType;
     private wrapToMultiGeometry: boolean;
@@ -38,21 +43,24 @@ export class GMLFeatureEncoder {
     private wrapToMultiPoint: boolean;
     private invert: boolean;
 
-    constructor(options?: GMLEncoderOptions) {
-        if (!options) options = {};
-        this.geometryMap = options.geometryMap ? options.geometryMap : ReplaceMapGeometries;
+    constructor(options: GMLEncoderOptions = {}) {
+        this.geometryMap = options.geometryMap || DefaultReplaceMap;
         this.gmlVersion = options.gmlVersion || '3.2';
-        const gmlGeometry = options.targetGeometry;
-        this.targetGeometry = GMLGeometryTypeToGeometry(gmlGeometry);
-        this.wrapToMultiGeometry = typeof options.wrapToMultiGeometry !== "undefined" ? options.wrapToMultiGeometry: this.targetGeometry === "MultiGeometry";
-        this.wrapToMultiSurface = typeof options.wrapToMultiGeometry !== "undefined" ? options.wrapToMultiSurface: (this.targetGeometry === "MultiSurface" || this.targetGeometry === "MultiPolygon");
-        this.wrapToMultiCurve = typeof options.wrapToMultiCurve !== "undefined" ? options.wrapToMultiCurve: (this.targetGeometry === "MultiCurve" || this.targetGeometry === "MultiLineString");
-        this.wrapToMultiPoint = typeof options.wrapToMultiPoint !== "undefined" ? options.wrapToMultiPoint: (this.targetGeometry === "MultiPoint");
-        this.invert = options.invert;
+        this.targetGeometry = GMLGeometryTypeToGeometry(options.targetGeometry || "");
+
+        this.wrapToMultiGeometry = options.wrapToMultiGeometry ?? (this.targetGeometry === "MultiGeometry");
+        this.wrapToMultiSurface = options.wrapToMultiSurface ?? (this.targetGeometry === "MultiSurface" || this.targetGeometry === "MultiPolygon");
+        this.wrapToMultiCurve = options.wrapToMultiCurve ?? (this.targetGeometry === "MultiCurve" || this.targetGeometry === "MultiLineString");
+        this.wrapToMultiPoint = options.wrapToMultiPoint ?? (this.targetGeometry === "MultiPoint");
+        this.invert = !!options.invert;
     }
 
-    encodeFeature(feature: Feature) {
-        const featureAsJSON = this.SingleFeatureGMLasJSONEncode(feature);
+    /**
+     * Encodes a feature to GML.
+     * @returns An object containing the geometry type, the full GML feature string, and the unwrapped GML geometry string.
+     */
+    public encodeFeature(feature: Feature) {
+        const featureAsJSON = this.singleFeatureGMLasJSONEncode(feature);
         const gmlFeature = encodeFeatureToGML(featureAsJSON, { gmlVersion: this.gmlVersion, invert: this.invert });
         return {
             geometryType: featureAsJSON.geometry.type,
@@ -61,153 +69,93 @@ export class GMLFeatureEncoder {
         };
     }
 
-    private static XMLUnwrap(text:string, querySelector: string) {
+    /** Helper to extract content from an XML tag. */
+    private static XMLUnwrap(text: string, querySelector: string): string | null {
         const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(text,"text/xml");
+        const xmlDoc = parser.parseFromString(text, "text/xml");
         const element = xmlDoc.querySelectorAll(querySelector);
-        if (element.length>0) return element[0].innerHTML;
-        return null
+        return element.length > 0 ? element[0].innerHTML : null;
     }
 
-    private reMapShapeTypeIfNeeded(type: GMLGeometryTypeNames): GMLGeometryTypeNames {
-        //TODO: implement shapeType conversions if needed
-        return type;
-    }
-
+    /** Encodes a feature to a GeoJSON string. */
     public static encodeFeatureToGeoJSON(feature: Feature) {
-        const memoryStore = new MemoryStore({reference: feature.shape.reference});
-        const newFeature = new Feature(feature.shape, feature.properties, feature.id)
+        const memoryStore = new MemoryStore({ reference: feature.shape.reference });
+        const newFeature = new Feature(feature.shape, feature.properties, feature.id);
         memoryStore.put(newFeature);
+
         const srsName = newFeature.shape ? newFeature.shape.reference.identifier : "";
         const cursor = memoryStore.query();
         const result = geoJSONCodec.encode(cursor);
+
         let geoJSONFeature: any;
         try {
             geoJSONFeature = JSON.parse(result.content);
-        } catch (err) {
+        } catch {
             geoJSONFeature = {};
         }
-        const geometryType = geoJSONFeature.geometry.type;
-        return {content: result.content, contentType: result.contentType, srsName: srsName, geometryType};
+
+        return { content: result.content, contentType: result.contentType, srsName, geometryType: geoJSONFeature.geometry?.type };
     }
 
-    // Perhaps needed in the future: srsName
-    public static decodeFeatureFromGeoJSON(content: string, srsName: string) {
-        const cursor = geoJSONCodecPreserveIds.decode({content, contentType: "application/geo+json"});
-        return cursor.hasNext() ? cursor.next() : null;
+    /** Decodes a feature from a GeoJSON string. */
+    public static decodeFeatureFromGeoJSON(content: string, srsName: string): Feature | null {
+        const cursor = geoJSONCodecPreserveIds.decode({ content, contentType: "application/geo+json" });
+        return cursor.hasNext() ? cursor.next() as Feature : null;
     }
 
-    private SingleFeatureGMLasJSONEncode(feature: Feature) {
-        const {content, srsName} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
+    private singleFeatureGMLasJSONEncode(feature: Feature): GMLFeature {
+        const { content, srsName } = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
         const featureAsJson = JSON.parse(content) as GMLFeature;
-        if (featureAsJson.type==="Feature" && featureAsJson.geometry)  {
-            featureAsJson.geometry.srsName = srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : srsName;
-            featureAsJson.geometry.type = this.reMapShapeTypeIfNeeded(featureAsJson.geometry.type);
+
+        if (featureAsJson.type === "Feature" && featureAsJson.geometry) {
+            const geometry = featureAsJson.geometry;
+            geometry.srsName = srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : srsName;
+
             if (this.wrapToMultiGeometry) {
-                if (featureAsJson.geometry.type!=="MultiGeometry") {
-                    // @ts-ignore
-                    featureAsJson.geometry = {
-                        id: "aMultiGeometry",
-                        type: "MultiGeometry",
-                        srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
-                        geometries: this.decomposeGeometries(featureAsJson.geometry)
-                    };
-                } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
-                    featureAsJson.geometry.geometries = this.decomposeGeometries(featureAsJson.geometry);
-                }
+                this.wrapGeometry(geometry, "MultiGeometry", "aMultiGeometry");
+            } else if (this.wrapToMultiSurface && geometry.type === "Polygon") {
+                this.wrapGeometry(geometry, this.targetGeometry, "aMultiSurface");
+            } else if (this.wrapToMultiCurve && geometry.type === "LineString") {
+                this.wrapGeometry(geometry, this.targetGeometry, "aMultiCurve");
+            } else if (this.wrapToMultiPoint && geometry.type === "Point") {
+                this.wrapGeometry(geometry, "MultiPoint", "aMultiPoint");
             }
-            if (this.wrapToMultiSurface) {
-                if (featureAsJson.geometry.type === "Polygon") {
-                    featureAsJson.geometry = {
-                            id: "aMultiSurface",
-                        // @ts-ignore
-                            type: this.targetGeometry,
-                            srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
-                        // @ts-ignore
-                           coordinates: [featureAsJson.geometry.coordinates]
-                        };
-                } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
-                    if (featureAsJson.geometry.type === "MultiPolygon") {
-                        // @ts-ignore
-                        featureAsJson.geometry.type = this.targetGeometry;
-                    }
-                }
+
+            // Standardize MultiPolygon to MultiSurface if required
+            if (geometry.type === "MultiPolygon") {
+                (geometry as any).type = "MultiSurface";
             }
-            if (this.wrapToMultiCurve) {
-                if (featureAsJson.geometry.type === "LineString") {
-                    featureAsJson.geometry = {
-                        id: "aMultiCurve",
-                        // @ts-ignore
-                        type: this.targetGeometry,
-                        srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
-                        // @ts-ignore
-                        coordinates: [featureAsJson.geometry.coordinates]
-                    };
-                } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
-                    if (featureAsJson.geometry.type === "MultiLineString") {
-                        // @ts-ignore
-                        featureAsJson.geometry.type = this.targetGeometry;
-                    }
-                }
-            }
-            if (this.wrapToMultiPoint) {
-                if (featureAsJson.geometry.type === "Point") {
-                    featureAsJson.geometry = {
-                        id: "aMultiPoint",
-                        // @ts-ignore
-                        type: "MultiPoint",
-                        srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
-                        // @ts-ignore
-                        coordinates: [featureAsJson.geometry.coordinates]
-                    };
-                } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
-                }
-            }
-            if (featureAsJson.geometry.type === "MultiPolygon") {
-                // @ts-ignore
-                featureAsJson.geometry.type = "MultiSurface"
-            }
-            return featureAsJson;
         }
-        return null;
+        return featureAsJson;
     }
 
-    private decomposeGeometries = (geometry: GMLGeometry): any => {
+    private wrapGeometry(geometry: GMLGeometry, type: any, id: string) {
+        if (type === "MultiGeometry") {
+            (geometry as any).geometries = this.decomposeGeometries(geometry);
+        } else {
+            (geometry as any).coordinates = [(geometry as any).coordinates];
+        }
+        geometry.id = id;
+        geometry.type = type;
+    }
+
+    private decomposeGeometries = (geometry: GMLGeometry): any[] => {
         switch (geometry.type) {
-            case "MultiGeometry": {
-                let geometries: GMLGeometry[] = [];
-                for (const g of geometry.geometries) {
-                    const dg = this.decomposeGeometries(g);
-                    geometries = [...geometries, ...dg];
-                }
-                return geometries;
-            }
-             case "MultiPolygon":
-                return geometry.coordinates.map(coord=>({
-                    type: 'Polygon',
-                    coordinates: coord
-                }))
+            case "MultiGeometry":
+                return geometry.geometries.flatMap(g => this.decomposeGeometries(g));
+            case "MultiPolygon":
             case "MultiSurface":
-                return geometry.coordinates.map(coord=>({
-                    type: 'Surface',
-                    coordinates: coord
-                }))
+            case "MultiCurve":
+            case "MultiLineString":
             case "MultiPoint":
-                return geometry.coordinates.map(coord=>({
-                    type: 'Point',
+                // @ts-ignore
+                const subType = geometry.type.replace("Multi", "").replace("Surface", "Polygon").replace("Curve", "LineString");
+                return (geometry as any).coordinates.map(coord => ({
+                    type: subType,
                     coordinates: coord
-                }))
-            case 'MultiLineString':
-                return geometry.coordinates.map(coord=>({
-                    type: 'LineString',
-                    coordinates: coord
-                }))
+                }));
             default:
-                return [geometry]
+                return [geometry];
         }
     }
 }
