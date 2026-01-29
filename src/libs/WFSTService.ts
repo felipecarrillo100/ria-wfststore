@@ -1,5 +1,4 @@
 import { HttpRequestHeaders } from "@luciad/ria/util/HttpRequestOptions";
-import { WFSFeatureDescription } from "./ParseWFSFeatureDescription";
 import { WFSTProtocol } from "./WFSTProtocol";
 
 /**

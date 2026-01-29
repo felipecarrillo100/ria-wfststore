@@ -3,7 +3,7 @@ import "isomorphic-fetch";
 import { WFSTFeatureStore } from "./WFSTFeatureStore";
 import { WFSCapabilitiesExtended } from "./WFSCapabilitiesExtended";
 import { getReference, parseWellKnownText, isValidReferenceIdentifier, addReference } from "@luciad/ria/reference/ReferenceProvider";
-import { createPoint, createPolygon } from "@luciad/ria/shape/ShapeFactory";
+import { createPolygon } from "@luciad/ria/shape/ShapeFactory";
 import { Feature } from "@luciad/ria/model/feature/Feature";
 import { GeoJsonCodec } from "@luciad/ria/model/codec/GeoJsonCodec";
 

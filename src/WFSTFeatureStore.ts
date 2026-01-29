@@ -478,6 +478,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         return { ...this.options, codec: undefined, reference: undefined };
     }
 
+
     private handleOtherHttpErrors(response: Response, resolve: (value: (PromiseLike<unknown> | unknown)) => void) {
         this.errorHandler.handleError(response, resolve);
     }

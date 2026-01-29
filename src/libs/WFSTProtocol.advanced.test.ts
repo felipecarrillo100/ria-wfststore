@@ -3,6 +3,7 @@ import { WFSTProtocol } from './WFSTProtocol';
 import { Feature } from '@luciad/ria/model/feature/Feature';
 import { createPoint, createPolygon } from '@luciad/ria/shape/ShapeFactory';
 import { getReference } from '@luciad/ria/reference/ReferenceProvider';
+import { PointCoordinates } from "@luciad/ria/shape/PointCoordinate";
 
 describe('WFSTProtocol Advanced Tests', () => {
 
@@ -23,7 +24,7 @@ describe('WFSTProtocol Advanced Tests', () => {
 
     it('should generate correct XML for GetFeatureByIds with multiple RIDs', () => {
         const xml = WFSTProtocol.createGetFeatureByIdsQuery({
-            typeName: "topp:states",
+            typeName,
             rids: ["states.1", "states.2"],
             prettyPrint: false
         });
@@ -31,7 +32,7 @@ describe('WFSTProtocol Advanced Tests', () => {
         expect(xml).toContain('<wfs:GetFeature');
         expect(xml).toContain('service="WFS"');
         expect(xml).toContain('version="2.0.0"');
-        expect(xml).toContain('<wfs:Query typeNames="topp:states">');
+        expect(xml).toContain(`<wfs:Query typeNames="${typeName}">`);
         expect(xml).toContain('<fes:Filter>');
         expect(xml).toContain('<fes:Or>');
         expect(xml).toContain('<fes:ResourceId rid="states.1"/>');
@@ -46,7 +47,7 @@ describe('WFSTProtocol Advanced Tests', () => {
         const feature = new Feature(point, { STATE_NAME: "Test" }, "new_id");
 
         const xml = WFSTProtocol.createInsertQuery({
-            typeName: "topp:states",
+            typeName,
             feature,
             featureDescription: { ...mockDescription, geometry: { name: "geom", type: "gml:PointPropertyType" } },
             invertAxes: false
@@ -62,7 +63,7 @@ describe('WFSTProtocol Advanced Tests', () => {
         const feature = new Feature(point, { STATE_NAME: "Test" }, "new_id");
 
         const xml = WFSTProtocol.createInsertQuery({
-            typeName: "topp:states",
+            typeName,
             feature,
             featureDescription: { ...mockDescription, geometry: { name: "geom", type: "gml:PointPropertyType" } },
             invertAxes: false
@@ -72,12 +73,12 @@ describe('WFSTProtocol Advanced Tests', () => {
     });
 
     it('should encode Polygons correctly', () => {
-        const exterior = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
+        const exterior: any = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
         const poly = createPolygon(ref84, [exterior]);
         const feature = new Feature(poly, {}, "poly_id");
 
         const xml = WFSTProtocol.createInsertQuery({
-            typeName: "topp:states",
+            typeName,
             feature,
             featureDescription: { ...mockDescription, geometry: { name: "geom", type: "gml:PolygonPropertyType" } }
         });
@@ -91,13 +92,12 @@ describe('WFSTProtocol Advanced Tests', () => {
 
     it('should encode MultiPoint correctly', () => {
         const p1 = createPoint(ref84, [0, 0]);
-        const p2 = createPoint(ref84, [10, 10]);
-        // In Ria, we might need a specific MultiPoint shape or a list. 
+        // In Ria, we might need a specific MultiPoint shape or a list.
         // For simpler unit test of the encoder logic, we'll verify it handles MultiPoint type.
         const feature = new Feature(p1, {}, "p_id");
 
         const xml = WFSTProtocol.createInsertQuery({
-            typeName: "topp:states",
+            typeName,
             feature,
             featureDescription: { ...mockDescription, geometry: { name: "geom", type: "gml:MultiPointPropertyType" } }
         });
@@ -108,15 +108,15 @@ describe('WFSTProtocol Advanced Tests', () => {
     });
 
     it('should encode MultiSurface correctly', () => {
-        const p1 = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]];
-        const p2 = [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]];
-        const poly = createPolygon(ref84, [p1, p2]); // In Ria, passing multiple rings to createPolygon can be interpreted as MultiPolygon if they don't overlap, or holes. 
+        const p1: any = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]];
+        const p2: any = [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]];
+        const poly = createPolygon(ref84, [p1, p2]); // In Ria, passing multiple rings to createPolygon can be interpreted as MultiPolygon if they don't overlap, or holes.
         // Better to use createPolygon twice and wrap, but Ria's createPolygon(ref, [r1, r2]) is usually exterior + holes.
         // Let's just test that the encoder produces MultiSurface if told to.
         const feature = new Feature(poly, {}, "multi_id");
 
         const xml = WFSTProtocol.createInsertQuery({
-            typeName: "topp:states",
+            typeName,
             feature,
             featureDescription: { ...mockDescription, geometry: { name: "geom", type: "gml:MultiSurfacePropertyType" } }
         });
