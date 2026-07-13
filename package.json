@@ -2,6 +2,28 @@
   "name": "ria-wfststore",
   "version": "0.1.0",
   "description": "Implements a WFS Store capable of WFS-T transactions",
+  "type": "module",
+  "main": "./lib/index.js",
+  "module": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./WFSCapabilitiesExtended": {
+      "types": "./lib/WFSCapabilitiesExtended.d.ts",
+      "import": "./lib/WFSCapabilitiesExtended.js"
+    },
+    "./WFSTFeatureStore": {
+      "types": "./lib/WFSTFeatureStore.d.ts",
+      "import": "./lib/WFSTFeatureStore.js"
+    },
+    "./WFSTFeatureLockStore": {
+      "types": "./lib/WFSTFeatureLockStore.d.ts",
+      "import": "./lib/WFSTFeatureLockStore.js"
+    }
+  },
   "files": [
     "lib/"
   ],

@@ -1,6 +1,7 @@
 export * from './WFSCapabilitiesExtended'
 export * from './WFSTFeatureStore'
 export * from './WFSTFeatureLockStore'
+export * from './libs/ParseWFSFeatureDescription'
 export { WFSTDelegateScreenHelper } from './libs/screen/WFSTDelegateScreenHelper'
 export { WFSTFeatureLocksStorage } from './libs/storage/WFSTFeatureLocksStorage'
 export type { WFSTEditFeatureLockIndexItem } from './libs/storage/WFSTFeatureLocksStorage'
