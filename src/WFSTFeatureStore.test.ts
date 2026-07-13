@@ -1,5 +1,4 @@
-import {describe, expect, it} from '@jest/globals';
-import "isomorphic-fetch";
+import { describe, expect, it } from 'vitest';
 import {WFSCapabilitiesExtended} from "./WFSCapabilitiesExtended";
 import {WFSTFeatureStore} from "./WFSTFeatureStore";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";

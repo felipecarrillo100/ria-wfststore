@@ -1,5 +1,4 @@
-import {describe, expect, it} from '@jest/globals';
-import "isomorphic-fetch";
+import { describe, expect, it } from 'vitest';
 import {WFSCapabilitiesExtended, WFSCapabilitiesExtendedResult} from "./WFSCapabilitiesExtended";
 
 describe('OgcOpenApiGetCapabilities',  () => {

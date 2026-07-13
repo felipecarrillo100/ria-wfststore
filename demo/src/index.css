@@ -1,0 +1,42 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* react-dockable-desktop v2-side-panel uses hardcoded dark colors instead of CSS vars.
+   Override here so the panel responds to the data-color-scheme attribute on <html>. */
+[data-color-scheme="light"] .v2-side-panel {
+  background: rgba(248, 249, 250, 0.95);
+  border-right-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.1);
+}
+
+[data-color-scheme="light"] .v2-side-panel-right {
+  border-left-color: rgba(0, 0, 0, 0.08);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.1);
+}
+
+[data-color-scheme="light"] .v2-side-panel-header {
+  background-color: rgba(255, 255, 255, 0.6);
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-color-scheme="light"] .v2-side-panel-close-button {
+  color: var(--text-secondary);
+}
+
+[data-color-scheme="light"] .v2-side-panel-close-button:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: #212529;
+}
