@@ -20,7 +20,8 @@
     "@rjsf/validator-ajv8": "^6.6.2",
     "react": "^19.2.6",
     "react-dockable-desktop": "^4.2.1",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "ria-wfststore": "file:../ria-wfststore-0.1.0.tgz"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

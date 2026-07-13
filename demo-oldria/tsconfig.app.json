@@ -10,10 +10,7 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
-    "jsx": "react-jsx",
-    "paths": {
-      "ria-wfststore": ["../src/index.ts"]
-    }
+    "jsx": "react-jsx"
   },
   "include": ["src"]
 }
