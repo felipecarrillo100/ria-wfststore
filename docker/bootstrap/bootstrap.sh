@@ -74,22 +74,30 @@ publish_featuretype() {
 
 publish_featuretype "states" "US States"
 publish_featuretype "test_features" "Editable scratch layer"
+publish_featuretype "lock_features" "Lock-flow scratch layer"
 
 log "Granting anonymous write access to $WORKSPACE layers (default GeoServer ACL restricts writes to admin roles)"
 # This endpoint's PUT only updates rules that already exist ("Unknown rules" 409 otherwise),
 # and POST only creates new ones ("Already existing rules" 409 otherwise) - so pick the verb
-# based on whether our rule keys are already present.
-ACL_JSON="$(curl -sf -u "$AUTH" "$GS_URL/rest/security/acl/layers.json")"
-if echo "$ACL_JSON" | grep -q "\"$WORKSPACE.states.w\""; then
-  ACL_METHOD=PUT
-else
-  ACL_METHOD=POST
-fi
-curl -sf -u "$AUTH" -X "$ACL_METHOD" -H "Content-Type: application/json" \
-  -d "{\"$WORKSPACE.states.w\":\"*\",\"$WORKSPACE.test_features.w\":\"*\"}" \
-  "$GS_URL/rest/security/acl/layers"
+# per rule based on whether it's already present.
+grant_anonymous_write() {
+  local layer="$1"
+  local acl_json
+  acl_json="$(curl -sf -u "$AUTH" "$GS_URL/rest/security/acl/layers.json")"
+  local method=POST
+  if echo "$acl_json" | grep -q "\"$WORKSPACE.$layer.w\""; then
+    method=PUT
+  fi
+  curl -sf -u "$AUTH" -X "$method" -H "Content-Type: application/json" \
+    -d "{\"$WORKSPACE.$layer.w\":\"*\"}" \
+    "$GS_URL/rest/security/acl/layers"
+}
+grant_anonymous_write "states"
+grant_anonymous_write "test_features"
+grant_anonymous_write "lock_features"
 
-log "Truncating test_features so the scratch layer always starts empty"
+log "Truncating scratch tables so they always start empty"
 psql -c "TRUNCATE TABLE test_features RESTART IDENTITY;"
+psql -c "TRUNCATE TABLE lock_features RESTART IDENTITY;"
 
-log "Bootstrap complete: $WORKSPACE:states and $WORKSPACE:test_features are ready as WFS-T layers."
+log "Bootstrap complete: $WORKSPACE:states, $WORKSPACE:test_features and $WORKSPACE:lock_features are ready as WFS-T layers."
