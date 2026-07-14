@@ -139,6 +139,95 @@ describe('AdvancedGMLCodec.encode', () => {
     });
 });
 
+// Backfilled coverage: these geometry types were previously only checked structurally (via
+// DOMParser assertions in the block above), never actually fed back through the real, inherited
+// GMLCodec.decode(). Round-tripping them closes that gap and proves encode() output is genuinely
+// consumable for every geometry type this codec already claims to support, not just Point.
+describe('AdvancedGMLCodec round-trip coverage for existing 2D geometry types', () => {
+    it('2D Polygon: round-trips ring coordinates and vertex count', () => {
+        const codec = new AdvancedGMLCodec();
+        const ring = [[0, 0], [0, 10], [10, 10], [10, 0], [0, 0]];
+        const feature = new Feature(createPolygon(reference, ring), {label: "poly"}, "f.poly");
+
+        const {content, contentType} = codec.encode(cursorOf(feature));
+        const decoded = codec.decode({content, contentType, reference}).next();
+
+        expect(decoded.id).toBe("f.poly");
+        const polygon = decoded.shape as Polygon;
+        expect(polygon.type).toBe(ShapeType.POLYGON);
+        expect(polygon.pointCount).toBe(ring.length);
+    });
+
+    it('2D LineString: round-trips every vertex', () => {
+        const codec = new AdvancedGMLCodec();
+        const points = [[0, 0], [1, 1], [2, 2], [3, 1]];
+        const feature = new Feature(createPolyline(reference, points as any), {label: "line"}, "f.line");
+
+        const {content, contentType} = codec.encode(cursorOf(feature));
+        const decoded = codec.decode({content, contentType, reference}).next();
+
+        const line = decoded.shape as Polyline;
+        expect(line.type).toBe(ShapeType.POLYLINE);
+        expect(line.pointCount).toBe(points.length);
+    });
+
+    it('MultiPoint (ShapeList of Points): round-trips member count and coordinates', () => {
+        const codec = new AdvancedGMLCodec();
+        const shapeList = createShapeList(reference, [
+            createPoint(reference, [1, 1]),
+            createPoint(reference, [2, 2]),
+            createPoint(reference, [3, 3]),
+        ]);
+        const feature = new Feature(shapeList, {label: "multipoint"}, "f.mp");
+
+        const {content, contentType} = codec.encode(cursorOf(feature));
+        expect(content).toContain("gml:MultiPoint");
+        const decoded = codec.decode({content, contentType, reference}).next();
+
+        const decodedList = decoded.shape as any;
+        expect(decodedList.shapeCount).toBe(3);
+        expect(decodedList.getShape(0).type).toBe(ShapeType.POINT);
+    });
+
+    it('MultiCurve (ShapeList of Polylines): round-trips member count and vertex counts', () => {
+        const codec = new AdvancedGMLCodec();
+        const shapeList = createShapeList(reference, [
+            createPolyline(reference, [[0, 0], [1, 1]] as any),
+            createPolyline(reference, [[5, 5], [6, 6], [7, 5]] as any),
+        ]);
+        const feature = new Feature(shapeList, {label: "multicurve"}, "f.mc");
+
+        const {content, contentType} = codec.encode(cursorOf(feature));
+        expect(content).toContain("gml:MultiCurve");
+        const decoded = codec.decode({content, contentType, reference}).next();
+
+        const decodedList = decoded.shape as any;
+        expect(decodedList.shapeCount).toBe(2);
+        expect(decodedList.getShape(0).type).toBe(ShapeType.POLYLINE);
+        expect(decodedList.getShape(1).pointCount).toBe(3);
+    });
+
+    it('ShapeList of Polygons normalized to gml:MultiSurface: round-trips member count and ring coordinates', () => {
+        const codec = new AdvancedGMLCodec();
+        const ring = [[0, 0], [0, 10], [10, 10], [10, 0], [0, 0]];
+        const otherRing = [[20, 20], [20, 30], [30, 30], [30, 20], [20, 20]];
+        const shapeList = createShapeList(reference, [
+            createPolygon(reference, ring),
+            createPolygon(reference, otherRing),
+        ]);
+        const feature = new Feature(shapeList, {label: "multi"}, "f.multi");
+
+        const {content, contentType} = codec.encode(cursorOf(feature));
+        const decoded = codec.decode({content, contentType, reference}).next();
+
+        const decodedList = decoded.shape as any;
+        expect(decodedList.shapeCount).toBe(2);
+        expect(decodedList.getShape(0).type).toBe(ShapeType.POLYGON);
+        expect(decodedList.getShape(0).pointCount).toBe(ring.length);
+        expect(decodedList.getShape(1).pointCount).toBe(otherRing.length);
+    });
+});
+
 // Per explicit request: a Point with 3 coordinates, a LineString where every vertex has 3
 // coordinates, and a Polygon ring where every vertex has 3 coordinates. Each round-trips through
 // encode() and the *inherited, real, unmocked* GMLCodec.decode() - the strongest possible proof,

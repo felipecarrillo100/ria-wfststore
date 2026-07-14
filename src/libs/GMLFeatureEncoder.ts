@@ -4,6 +4,7 @@ import {MemoryStore} from "@luciad/ria/model/store/MemoryStore";
 import {encodeFeatureToGML, GMLFeature} from "./gml/gml32/encodeFeatureToGML";
 import {GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry} from "./ParseWFSFeatureDescription";
 import {GMLGeometry, GMLGeometryTypeNames} from "./gml/gml32/GMLGeometry";
+import {normalizeGMLGeometry, normalizeSrsName} from "./gml/gml32/normalizeGMLGeometry";
 
 // mode3D:true unconditionally: this is an internal Feature<->JSON transport format, never inspected
 // directly by anything outside this file, so it should always preserve Z faithfully. Whether the
@@ -109,7 +110,7 @@ export class GMLFeatureEncoder {
         const {content, srsName} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
         const featureAsJson = JSON.parse(content) as GMLFeature;
         if (featureAsJson.type==="Feature" && featureAsJson.geometry)  {
-            featureAsJson.geometry.srsName = srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : srsName;
+            featureAsJson.geometry.srsName = normalizeSrsName(srsName);
             featureAsJson.geometry.type = this.reMapShapeTypeIfNeeded(featureAsJson.geometry.type);
             if (this.wrapToMultiGeometry) {
                 if (featureAsJson.geometry.type!=="MultiGeometry") {
@@ -117,11 +118,11 @@ export class GMLFeatureEncoder {
                     featureAsJson.geometry = {
                         id: "aMultiGeometry",
                         type: "MultiGeometry",
-                        srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
+                        srsName: normalizeSrsName(featureAsJson.geometry.srsName),
                         geometries: this.decomposeGeometries(featureAsJson.geometry)
                     };
                 } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
+                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
                     featureAsJson.geometry.geometries = this.decomposeGeometries(featureAsJson.geometry);
                 }
             }
@@ -131,12 +132,12 @@ export class GMLFeatureEncoder {
                             id: "aMultiSurface",
                         // @ts-ignore
                             type: this.targetGeometry,
-                            srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
+                            srsName: normalizeSrsName(featureAsJson.geometry.srsName),
                         // @ts-ignore
                            coordinates: [featureAsJson.geometry.coordinates]
                         };
                 } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
+                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
                     if (featureAsJson.geometry.type === "MultiPolygon") {
                         // @ts-ignore
                         featureAsJson.geometry.type = this.targetGeometry;
@@ -149,12 +150,12 @@ export class GMLFeatureEncoder {
                         id: "aMultiCurve",
                         // @ts-ignore
                         type: this.targetGeometry,
-                        srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
+                        srsName: normalizeSrsName(featureAsJson.geometry.srsName),
                         // @ts-ignore
                         coordinates: [featureAsJson.geometry.coordinates]
                     };
                 } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
+                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
                     if (featureAsJson.geometry.type === "MultiLineString") {
                         // @ts-ignore
                         featureAsJson.geometry.type = this.targetGeometry;
@@ -167,18 +168,15 @@ export class GMLFeatureEncoder {
                         id: "aMultiPoint",
                         // @ts-ignore
                         type: "MultiPoint",
-                        srsName: featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName,
+                        srsName: normalizeSrsName(featureAsJson.geometry.srsName),
                         // @ts-ignore
                         coordinates: [featureAsJson.geometry.coordinates]
                     };
                 } else {
-                    featureAsJson.geometry.srsName = featureAsJson.geometry.srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : featureAsJson.geometry.srsName;
+                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
                 }
             }
-            if (featureAsJson.geometry.type === "MultiPolygon") {
-                // @ts-ignore
-                featureAsJson.geometry.type = "MultiSurface"
-            }
+            featureAsJson.geometry = normalizeGMLGeometry(featureAsJson.geometry);
             return featureAsJson;
         }
         return null;

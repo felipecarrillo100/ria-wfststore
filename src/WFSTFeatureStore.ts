@@ -84,47 +84,47 @@ export class WFSTFeatureStore extends WFSFeatureStore {
     }
 
     public static createFromCapabilities_WFST(extended: WFSCapabilitiesExtendedResult, typeName:string, options: WFSFeatureStoreCreateOptions = {}) {
-        const e = extended.wfsCapabilities;
+        const wfsCapabilities = extended.wfsCapabilities;
         const wfst = extended.wfstCapabilities.WFSTOperations;
-        const match = e.featureTypes.filter((e => e.name === typeName))[0];
+        const match = wfsCapabilities.featureTypes.filter((featureType => featureType.name === typeName))[0];
         if (typeof match === "undefined") throw new ProgrammingError(`there is no feature type "${typeName}" in capabilities`);
-        const {reference: i, srsName: o} = getReferenceForWFS(match, options.reference);
-        const n = e.operations.filter((e => "GetFeature" === e.name))[0].supportedRequests;
-        let a = "";
-        let u = "";
-        const c = [];
-        n.forEach((e => {
-            const r = processServiceUrl(e.url);
-            if ("GET" === e.method) a = r; else if ("POST" === e.method) u = r;
-            c.push(e.method)
+        const {reference, srsName} = getReferenceForWFS(match, options.reference);
+        const getFeatureRequests = wfsCapabilities.operations.filter((operation => "GetFeature" === operation.name))[0].supportedRequests;
+        let getServiceURL = "";
+        let postServiceURL = "";
+        const supportedMethods: string[] = [];
+        getFeatureRequests.forEach((request => {
+            const url = processServiceUrl(request.url);
+            if ("GET" === request.method) getServiceURL = url; else if ("POST" === request.method) postServiceURL = url;
+            supportedMethods.push(request.method)
         }));
         if (typeof options.serviceURL === "string") {
-            a = options.serviceURL;
-            u = options.serviceURL
+            getServiceURL = options.serviceURL;
+            postServiceURL = options.serviceURL
         } else if (options.serviceURL) {
-            if (typeof options.serviceURL.GET === "string") a = options.serviceURL.GET;
-            if (typeof options.serviceURL.POST === "string") u = options.serviceURL.POST
+            if (typeof options.serviceURL.GET === "string") getServiceURL = options.serviceURL.GET;
+            if (typeof options.serviceURL.POST === "string") postServiceURL = options.serviceURL.POST
         }
-        const p = options.versions || [e.version];
-        const f = options.outputFormat || getOutputFormat(p, match.outputFormats);
-        const m = {
+        const versions = options.versions || [wfsCapabilities.version];
+        const outputFormat = options.outputFormat || getOutputFormat(versions, match.outputFormats);
+        const constructorOptions = {
             typeName: match.name,
-            serviceURL: a,
-            postServiceURL: u,
-            reference: i,
-            srsName: o,
+            serviceURL: getServiceURL,
+            postServiceURL: postServiceURL,
+            reference,
+            srsName,
             codec: options.codec,
-            outputFormat: f,
-            versions: p,
-            methods: mergeRequestMethods(c, options.methods),
+            outputFormat,
+            versions,
+            methods: mergeRequestMethods(supportedMethods, options.methods),
             credentials: options.credentials,
             requestHeaders: options.requestHeaders,
             swapAxes: options.swapAxes,
             geometryName: options.geometryName,
             requestParameters: options.requestParameters,
-            bounds: getModelBoundsFromCapabilities(match, i)
+            bounds: getModelBoundsFromCapabilities(match, reference)
         };
-        return new WFSTFeatureStore({...m, wfst})
+        return new WFSTFeatureStore({...constructorOptions, wfst})
     }
 
 
@@ -679,85 +679,91 @@ export class WFSTFeatureStore extends WFSFeatureStore {
 }
 
 
-function getReferenceForWFS(e: WFSCapabilitiesFeatureType, r): any {
-    const t = getDataReference(e.defaultReference);
-    if (t && !r) return {reference: t, srsName: e.defaultReference};
-    if (r) {
-        if (t && t.equals(r)) return {reference: t, srsName: e.defaultReference};
-        const s = getOtherReferenceFromCapabilities(e.otherReferences, r);
-        if (s) return s;
-        console.warn(`WFSFeature: User reference '${r.identifier}' is not supported by WFS service`);
-        return {reference: r}
+interface ReferenceAndSrsName {
+    reference: CoordinateReference;
+    srsName?: string;
+}
+
+function getReferenceForWFS(featureType: WFSCapabilitiesFeatureType, userReference?: CoordinateReference): ReferenceAndSrsName {
+    const defaultReference = getDataReference(featureType.defaultReference);
+    if (defaultReference && !userReference) return {reference: defaultReference, srsName: featureType.defaultReference};
+    if (userReference) {
+        if (defaultReference && defaultReference.equals(userReference)) return {reference: defaultReference, srsName: featureType.defaultReference};
+        const other = getOtherReferenceFromCapabilities(featureType.otherReferences, userReference);
+        if (other) return other;
+        console.warn(`WFSFeature: User reference '${userReference.identifier}' is not supported by WFS service`);
+        return {reference: userReference}
     }
-    const s = getOtherReferenceFromCapabilities(e.otherReferences, undefined);
-    if (s) return s;
+    const other = getOtherReferenceFromCapabilities(featureType.otherReferences, undefined);
+    if (other) return other;
     throw new ProgrammingError("WFSFeature: No reference from WFS capabilities is supported")
 }
 
-function getDataReference(e) {
-    if (isValidReferenceIdentifier(e)) return getReference(e);
+function getDataReference(referenceIdentifierOrWKT: string): CoordinateReference | undefined {
+    if (isValidReferenceIdentifier(referenceIdentifierOrWKT)) return getReference(referenceIdentifierOrWKT);
     try {
-        return parseWellKnownText(e)
-    } catch (r) {
-        console.warn(`WFSFeatureStore: reference unsupported: ${e}`)
+        return parseWellKnownText(referenceIdentifierOrWKT)
+    } catch (error) {
+        console.warn(`WFSFeatureStore: reference unsupported: ${referenceIdentifierOrWKT}`)
     }
 }
 
-function getOtherReferenceFromCapabilities(e, r) {
-    for (let t = 0; t < e.length; t++) {
-        const s = e[t];
-        const i = getDataReference(s);
-        if (i) {
-            if (!r) return {reference: i, srsName: s};
-            if (r.equals(i)) return {reference: r, srsName: s}
+function getOtherReferenceFromCapabilities(otherReferences: string[], userReference?: CoordinateReference): ReferenceAndSrsName | undefined {
+    for (let index = 0; index < otherReferences.length; index++) {
+        const srsName = otherReferences[index];
+        const reference = getDataReference(srsName);
+        if (reference) {
+            if (!userReference) return {reference, srsName};
+            if (userReference.equals(reference)) return {reference: userReference, srsName}
         }
     }
 }
 
 const FORMATS = {json: [RegExp("json", "i")], gml: [RegExp("gml", "i"), RegExp("text/xml", "i")]};
+type FormatCategory = keyof typeof FORMATS;
 
-function hasFormatType(e, t) {
-    return t.some((t => e.some((e => e.test(t)))))
+function hasFormatType(patterns: RegExp[], formats: string[]): boolean {
+    return formats.some((format => patterns.some((pattern => pattern.test(format)))))
 }
 
-function getOutputType(e = []) {
-    if (e.length > 0) {
-        if (hasFormatType(FORMATS.json, e)) return "json";
-        if (hasFormatType(FORMATS.gml, e)) return "gml"
+function getOutputType(formats: string[] = []): FormatCategory {
+    if (formats.length > 0) {
+        if (hasFormatType(FORMATS.json, formats)) return "json";
+        if (hasFormatType(FORMATS.gml, formats)) return "gml"
     }
     return "json"
 }
 
-function getFirstFormatOfType(e, t) {
-    return e.find((e => FORMATS[t].some((t => t.test(e)))))
+function getFirstFormatOfType(formats: string[], category: FormatCategory): string | undefined {
+    return formats.find((format => FORMATS[category].some((pattern => pattern.test(format)))))
 }
 
 const DEFAULT_OUTPUT_GML_WFS_1 = "text/xml; subtype=gml/3.1.1";
 const DEFAULT_OUTPUT_GML_WFS_2 = "application/gml+xml; version=3.2";
 const DEFAULT_OUTPUT_JSON = "application/json";
 
-function getOutputFormat(e, t = []) {
-    if ("json" === getOutputType(t)) return t.includes(DEFAULT_OUTPUT_JSON) ? DEFAULT_OUTPUT_JSON : getFirstFormatOfType(t, "json") ?? DEFAULT_OUTPUT_JSON;
-    if (e.some((e => e === WFSVersion.V202 || e === WFSVersion.V200)) && t.includes(DEFAULT_OUTPUT_GML_WFS_2)) return DEFAULT_OUTPUT_GML_WFS_2;
-    if (e.some((e => e === WFSVersion.V110 || e === WFSVersion.V100)) && t.includes(DEFAULT_OUTPUT_GML_WFS_1)) return DEFAULT_OUTPUT_GML_WFS_1;
-    return getFirstFormatOfType(t, "gml") ?? DEFAULT_OUTPUT_GML_WFS_2
+function getOutputFormat(versions: WFSVersion[], formats: string[] = []): string {
+    if ("json" === getOutputType(formats)) return formats.includes(DEFAULT_OUTPUT_JSON) ? DEFAULT_OUTPUT_JSON : getFirstFormatOfType(formats, "json") ?? DEFAULT_OUTPUT_JSON;
+    if (versions.some((version => version === WFSVersion.V202 || version === WFSVersion.V200)) && formats.includes(DEFAULT_OUTPUT_GML_WFS_2)) return DEFAULT_OUTPUT_GML_WFS_2;
+    if (versions.some((version => version === WFSVersion.V110 || version === WFSVersion.V100)) && formats.includes(DEFAULT_OUTPUT_GML_WFS_1)) return DEFAULT_OUTPUT_GML_WFS_1;
+    return getFirstFormatOfType(formats, "gml") ?? DEFAULT_OUTPUT_GML_WFS_2
 }
 
-function mergeRequestMethods(e, t) {
-    if (!t || !Array.isArray(t) || !t.length) return e;
-    const o = e.filter((e => t.indexOf(e) > -1));
-    if (0 === o.length) {
-        console.warn(`WFS service does not support request methods: ${t.join(", ")}`);
-        return e
+function mergeRequestMethods(supportedMethods: string[], requestedMethods?: string[]): string[] {
+    if (!requestedMethods || !Array.isArray(requestedMethods) || !requestedMethods.length) return supportedMethods;
+    const matched = supportedMethods.filter((method => requestedMethods.indexOf(method) > -1));
+    if (0 === matched.length) {
+        console.warn(`WFS service does not support request methods: ${requestedMethods.join(", ")}`);
+        return supportedMethods
     }
-    return o
+    return matched
 }
 
-function getModelBoundsFromCapabilities(e, r) {
-    const t = e.getWGS84Bounds()[0];
-    if (t?.reference) return createTransformation(t.reference, r).transformBounds(t)
+function getModelBoundsFromCapabilities(featureType: WFSCapabilitiesFeatureType, reference: CoordinateReference) {
+    const wgs84Bounds = featureType.getWGS84Bounds()[0];
+    if (wgs84Bounds?.reference) return createTransformation(wgs84Bounds.reference, reference).transformBounds(wgs84Bounds)
 }
 
-function processServiceUrl(e) {
-    return "?" === e[e.length - 1] ? e.substring(0, e.length - 1) : e
+function processServiceUrl(url: string): string {
+    return "?" === url[url.length - 1] ? url.substring(0, url.length - 1) : url
 }

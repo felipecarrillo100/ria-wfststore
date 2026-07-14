@@ -10,6 +10,7 @@ import {XMLBuilder} from "xmlbuilder2/lib/interfaces";
 import {encodeFeatureToGML, GMLFeature} from "./encodeFeatureToGML";
 import {encodeGeometryToGML} from "./encodeGeometryToGML";
 import {GMLGeometry} from "./GMLGeometry";
+import {normalizeGMLGeometry, normalizeSrsName} from "./normalizeGMLGeometry";
 import {GMLFeatureEncoder} from "../../GMLFeatureEncoder";
 
 export interface AdvancedGMLCodecConstructorOptions extends GMLCodecConstructorOptions {
@@ -102,9 +103,9 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         if (!shape) return null;
         const geoJsonGeometry = this.shapeCodec.encodeShape(shape);
         if (!geoJsonGeometry) return null;
-        const gmlGeometry = AdvancedGMLCodec.normalizeGeometry({
+        const gmlGeometry = normalizeGMLGeometry({
             ...geoJsonGeometry,
-            srsName: AdvancedGMLCodec.normalizeSrsName(shape.reference.identifier)
+            srsName: normalizeSrsName(shape.reference.identifier)
         } as GMLGeometry);
         return encodeGeometryToGML(gmlGeometry, {
             gmlVersion: this.gmlVersion,
@@ -131,29 +132,15 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
     private toGMLFeatureJSON(feature: Feature): GMLFeature {
         const {content, srsName} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
         const featureAsJson = JSON.parse(content) as GMLFeature;
-        featureAsJson.geometry = AdvancedGMLCodec.normalizeGeometry({
+        featureAsJson.geometry = normalizeGMLGeometry({
             ...featureAsJson.geometry,
-            srsName: AdvancedGMLCodec.normalizeSrsName(srsName)
+            srsName: normalizeSrsName(srsName)
         });
         return featureAsJson;
     }
 
     private shouldInvert(referenceIdentifier: string): boolean | undefined {
         return this.swapAxesOption?.includes(referenceIdentifier);
-    }
-
-    // These two normalizations mirror GMLFeatureEncoder's own (unconditional, schema-independent)
-    // adjustments. Duplicated here rather than shared, since GMLFeatureEncoder has no unit test
-    // coverage yet to safely extract a common helper from.
-    private static normalizeSrsName(srsName: string): string {
-        return srsName === "CRS:84" ? "urn:ogc:def:crs:EPSG:4326" : srsName;
-    }
-
-    private static normalizeGeometry(geometry: GMLGeometry): GMLGeometry {
-        if ((geometry.type as string) === "MultiPolygon") {
-            return {...geometry, type: "MultiSurface"} as GMLGeometry;
-        }
-        return geometry;
     }
 
     private static generateId(prefix: string): string {
