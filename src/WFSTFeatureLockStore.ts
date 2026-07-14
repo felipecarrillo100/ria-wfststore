@@ -93,7 +93,7 @@ export class WFSTFeatureLockStore extends MemoryStore {
     add(feature: Feature, options?: object): FeatureId {
         const addFeature = () => {
             const {newFeature, validProperties} = standardizeProperties(this.getFeatureTemplate(), feature);
-            const insertedIndex = this.options.insertedIds.findIndex(e=>e.id===id);
+            const insertedIndex = this.options.insertedIds.findIndex(e=>e.id===feature.id);
             const {content, geometryType} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
             const template = this.getFeatureTemplate();
             const isCompatibleGeometry = areCompatibleGeometries(geometryType as any, template.geometry.type);
