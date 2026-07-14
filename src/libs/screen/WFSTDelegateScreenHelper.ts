@@ -1,6 +1,8 @@
 import {Feature} from "@luciad/ria/model/feature/Feature";
-import {WFSTFeatureStore} from "../../WFSTFeatureStore";
-import {WFSTFeatureLockStore} from "../../WFSTFeatureLockStore";
+// `import type` keeps this a type-only edge: WFSTFeatureStore and WFSTFeatureLockStore both
+// construct a WFSTDelegateScreenHelper, so a value import here would be a real runtime cycle.
+import type {WFSTFeatureStore} from "../../WFSTFeatureStore";
+import type {WFSTFeatureLockStore} from "../../WFSTFeatureLockStore";
 
 
 export class WFSTDelegateScreenHelper {

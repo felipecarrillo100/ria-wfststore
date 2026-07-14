@@ -3,8 +3,8 @@ import {WFSCapabilitiesExtended, WFSCapabilitiesExtendedResult} from "./WFSCapab
 
 describe('OgcOpenApiGetCapabilities',  () => {
 
-    it('OgcOpenApiGetCapabilities.fromURL localhost:8081/geoserver', async () => {
-        return WFSCapabilitiesExtended.fromURL("http://localhost:8081/geoserver/ows").then(({wfsCapabilities, wfstCapabilities}:WFSCapabilitiesExtendedResult)=>{
+    it('OgcOpenApiGetCapabilities.fromURL localhost:8092/geoserver', async () => {
+        return WFSCapabilitiesExtended.fromURL("http://localhost:8092/geoserver/ows").then(({wfsCapabilities, wfstCapabilities}:WFSCapabilitiesExtendedResult)=>{
             // testing geoserver
             expect(wfstCapabilities.WFSTCapable).toBe(true);
         }, ()=>{
@@ -12,8 +12,8 @@ describe('OgcOpenApiGetCapabilities',  () => {
         })
     });
 
-    it('OgcOpenApiGetCapabilities.fromURL localhost:8081/geoserver', async () => {
-        return WFSCapabilitiesExtended.fromURL("http://localhost:8081/geoserver/ows").then(({wfsCapabilities, wfstCapabilities}:WFSCapabilitiesExtendedResult)=>{
+    it('OgcOpenApiGetCapabilities.fromURL localhost:8092/geoserver', async () => {
+        return WFSCapabilitiesExtended.fromURL("http://localhost:8092/geoserver/ows").then(({wfsCapabilities, wfstCapabilities}:WFSCapabilitiesExtendedResult)=>{
             // testing geoserver
             const expected = {
                 "LockFeature": {},

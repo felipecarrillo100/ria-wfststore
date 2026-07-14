@@ -5,7 +5,7 @@ import {create} from "xmlbuilder2";
 import {WFSTInvalidGeometry} from "./WFSTInvalidGeometry";
 import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";
-import {WFSTEditFeatureLockItem} from "../WFSTFeatureStore";
+import {WFSTEditFeatureLockItem} from "../types/WFSTTypes";
 
 interface WFSTAddUpdateRequestOptions {
     typeName: string;
@@ -14,6 +14,7 @@ interface WFSTAddUpdateRequestOptions {
     onlyProperties?: boolean;
     prettyPrint?: boolean
     invertAxes?: boolean;
+    mode3D?: boolean;
 }
 
 interface WFSTRemoveRequestOptions {
@@ -35,6 +36,7 @@ interface WFSTCommitLockTransaction {
     featureDescription: WFSFeatureDescription,
     prettyPrint?: boolean;
     invertAxes?: boolean;
+    mode3D?: boolean;
 }
 
 interface ReleaseLockOptions {
@@ -99,7 +101,7 @@ ${this.singleAdd2_0_0(options)}
     private static singleAdd2_0_0( options: WFSTAddUpdateRequestOptions ) {
         const properties = this.propertiesAsGMLForAdd(options.feature);
         const targetGeometry = options.featureDescription.geometry.type as GMLGeometryTypeKey;
-        const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes});
+        const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes, mode3D: options.mode3D});
         const {geometry, geometryType} = gmlEncoder.encodeFeature(options.feature);
         this.verifyGeometryCompatibilityOrThrowError(geometryType, targetGeometry);
         const split = options.typeName.split(":");
@@ -150,7 +152,7 @@ ${this.singleUpdate2_0_0(options)}
             geometryContent = ""
         } else {
             const targetGeometry = options.featureDescription.geometry.type as GMLGeometryTypeKey;
-            const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes});
+            const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes, mode3D: options.mode3D});
             const {geometry, geometryType} = gmlEncoder.encodeFeature(options.feature);
             this.verifyGeometryCompatibilityOrThrowError(geometryType, targetGeometry);
             const geometryName = options.featureDescription.geometry.name;
@@ -203,7 +205,9 @@ ${this.singleUpdate2_0_0(options)}
 
     private static encodeJSONFeatureHelper(jsonFeature: string, srsName: string): Feature {
         const reference = getReference(srsName);
-        const jsonDecoder = new GeoJsonCodec({generateIDs: false, reference});
+        // mode3D:true: this must stay symmetric with GMLFeatureEncoder's own internal codecs, or Z
+        // gets silently dropped here, one hop before the feature is re-encoded for the WFS-T request.
+        const jsonDecoder = new GeoJsonCodec({generateIDs: false, reference, mode3D: true});
         const cursor = jsonDecoder.decode({content: jsonFeature, contentType:"application/json"});
         if (cursor.hasNext()) {
             return cursor.next() as Feature;
@@ -225,14 +229,16 @@ ${this.singleUpdate2_0_0(options)}
             featureDescription: options.featureDescription,
             onlyProperties: element.onlyProperties,
             prettyPrint: options.prettyPrint,
-            invertAxes: options.invertAxes
+            invertAxes: options.invertAxes,
+            mode3D: options.mode3D
         }));
         const insertedItems = options.lockItem.insertedIds.map(element=> this.singleAdd2_0_0({
             typeName: options.typeName,
             feature: this.encodeJSONFeatureHelper(element.feature, options.lockItem.srsName),
             featureDescription: options.featureDescription,
             prettyPrint: options.prettyPrint,
-            invertAxes: options.invertAxes
+            invertAxes: options.invertAxes,
+            mode3D: options.mode3D
         }));
 
         return this.prettyPrint(`<?xml version="1.0" ?>

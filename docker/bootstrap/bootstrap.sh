@@ -75,6 +75,7 @@ publish_featuretype() {
 publish_featuretype "states" "US States"
 publish_featuretype "test_features" "Editable scratch layer"
 publish_featuretype "lock_features" "Lock-flow scratch layer"
+publish_featuretype "test_features_3d" "3D editable scratch layer"
 
 log "Granting anonymous write access to $WORKSPACE layers (default GeoServer ACL restricts writes to admin roles)"
 # This endpoint's PUT only updates rules that already exist ("Unknown rules" 409 otherwise),
@@ -95,9 +96,11 @@ grant_anonymous_write() {
 grant_anonymous_write "states"
 grant_anonymous_write "test_features"
 grant_anonymous_write "lock_features"
+grant_anonymous_write "test_features_3d"
 
 log "Truncating scratch tables so they always start empty"
 psql -c "TRUNCATE TABLE test_features RESTART IDENTITY;"
 psql -c "TRUNCATE TABLE lock_features RESTART IDENTITY;"
+psql -c "TRUNCATE TABLE test_features_3d RESTART IDENTITY;"
 
-log "Bootstrap complete: $WORKSPACE:states, $WORKSPACE:test_features and $WORKSPACE:lock_features are ready as WFS-T layers."
+log "Bootstrap complete: $WORKSPACE:states, $WORKSPACE:test_features, $WORKSPACE:lock_features and $WORKSPACE:test_features_3d are ready as WFS-T layers."

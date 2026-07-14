@@ -12,7 +12,7 @@ import {Feature} from "@luciad/ria/model/feature/Feature";
 // reload it, build a WFSTFeatureLockStore from it, edit through the lock store, then commit
 // or cancel. A src/ refactor must keep every one of these calls working exactly as today.
 
-const OWS_URL = "http://localhost:8081/geoserver/ows";
+const OWS_URL = "http://localhost:8092/geoserver/ows";
 const TYPE_NAME = "wfst_test:lock_features";
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5000, intervalMs = 50): Promise<void> {

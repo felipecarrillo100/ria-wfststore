@@ -5,8 +5,12 @@ import {encodeFeatureToGML, GMLFeature} from "./gml/gml32/encodeFeatureToGML";
 import {GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry} from "./ParseWFSFeatureDescription";
 import {GMLGeometry, GMLGeometryTypeNames} from "./gml/gml32/GMLGeometry";
 
-const geoJSONCodec = new GeoJsonCodec({generateIDs: true});
-const geoJSONCodecPreserveIds = new GeoJsonCodec({generateIDs: false});
+// mode3D:true unconditionally: this is an internal Feature<->JSON transport format, never inspected
+// directly by anything outside this file, so it should always preserve Z faithfully. Whether the
+// final GML output actually WRITES 3 coordinates is a separate decision made downstream, in
+// encodeGeometryToGML, per its own mode3D option/auto-detection.
+const geoJSONCodec = new GeoJsonCodec({generateIDs: true, mode3D: true});
+const geoJSONCodecPreserveIds = new GeoJsonCodec({generateIDs: false, mode3D: true});
 
 interface GeometryMapType {
     GeometryCollection?: string;
@@ -22,6 +26,8 @@ interface GMLEncoderOptions {
     targetGeometry?: GMLGeometryTypeKey;
     gmlVersion?: '3.2' | '3.1.1';
     invert?: boolean;
+    // true/false forces 3D/2D output; omitted auto-detects from the feature's own geometry.
+    mode3D?: boolean;
 }
 
 
@@ -37,6 +43,7 @@ export class GMLFeatureEncoder {
     private wrapToMultiCurve: boolean;
     private wrapToMultiPoint: boolean;
     private invert: boolean;
+    private mode3D?: boolean;
 
     constructor(options?: GMLEncoderOptions) {
         if (!options) options = {};
@@ -49,11 +56,12 @@ export class GMLFeatureEncoder {
         this.wrapToMultiCurve = typeof options.wrapToMultiCurve !== "undefined" ? options.wrapToMultiCurve: (this.targetGeometry === "MultiCurve" || this.targetGeometry === "MultiLineString");
         this.wrapToMultiPoint = typeof options.wrapToMultiPoint !== "undefined" ? options.wrapToMultiPoint: (this.targetGeometry === "MultiPoint");
         this.invert = options.invert;
+        this.mode3D = options.mode3D;
     }
 
     encodeFeature(feature: Feature) {
         const featureAsJSON = this.SingleFeatureGMLasJSONEncode(feature);
-        const gmlFeature = encodeFeatureToGML(featureAsJSON, { gmlVersion: this.gmlVersion, invert: this.invert });
+        const gmlFeature = encodeFeatureToGML(featureAsJSON, { gmlVersion: this.gmlVersion, invert: this.invert, mode3D: this.mode3D });
         return {
             geometryType: featureAsJSON.geometry.type,
             feature: gmlFeature,

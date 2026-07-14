@@ -26,39 +26,25 @@ import {WFSCapabilitiesFeatureType} from "@luciad/ria/model/capabilities/WFSCapa
 import {createTransformation} from "@luciad/ria/transformation/TransformationFactory";
 import {WFSCapabilitiesFromUrlOptions} from "@luciad/ria/model/capabilities/WFSCapabilities";
 import {QueryOptions} from "@luciad/ria/model/store/Store";
+import type {
+    CommitLockTransactionResult,
+    WFSEditedFeature,
+    WFSTEditFeatureLockItem,
+    WFSTEditGetFeatureWithLockItem,
+    WFSTFeatureStoreConstructorOptions
+} from "./types/WFSTTypes";
 
-export interface WFSEditedFeature {id: string,  feature: string, onlyProperties?: boolean}
-
-export interface CommitLockTransactionResult {
-    success: boolean;
-    totalInserted: number;
-    totalUpdated: number;
-    totalReplaced: number;
-    totalDeleted: number;
-    totalChanges: number;
-}
-
-export interface WFSTEditFeatureLockItem {
-    id?: string;
-    lockId: string;
-    expiry: number;
-    lockName: string;
-    storeSettings: WFSTFeatureStoreConstructorOptions;
-    unchangedIds: string[];
-    updatedIds: WFSEditedFeature[];
-    insertedIds: WFSEditedFeature[];
-    deletedIds: string[];
-    srsName: string;
-}
-export interface WFSTEditGetFeatureWithLockItem extends WFSTEditFeatureLockItem {
-    timeStamp: string;
-    numberMatched: number;
-    numberReturned: number
-    rawData?: string;
-}
-export interface WFSTFeatureStoreConstructorOptions extends WFSFeatureStoreConstructorOptions {
-    wfst: WFSTOperationsKeys;
-}
+// Re-exported here for backwards compatibility: these types used to be declared in this file.
+// `export type` matters: esbuild transpiles this file in isolation and can't tell a plain
+// `export { X }` refers to an interface with no runtime existence, so it would emit a broken
+// runtime re-export.
+export type {
+    CommitLockTransactionResult,
+    WFSEditedFeature,
+    WFSTEditFeatureLockItem,
+    WFSTEditGetFeatureWithLockItem,
+    WFSTFeatureStoreConstructorOptions
+};
 
 interface FetchSettingsOptions {
     method?: string;
@@ -73,6 +59,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
     private version: WFSVersion;
     private delegateScreen: WFSTDelegateScreenHelper;
     private invertAxes: boolean;
+    private mode3D?: boolean;
 
     constructor(options: WFSTFeatureStoreConstructorOptions) {
         super(options);
@@ -82,6 +69,9 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         this.version = options.versions && options.versions.length>0 ? options.versions[0] : WFSVersion.V200;
         this.delegateScreen = new WFSTDelegateScreenHelper();
         this.invertAxes = !!options.swapAxes;
+        // Unlike invertAxes above, this must NOT be coerced with !! - omitted (undefined) means
+        // "auto-detect per feature", which is what every existing caller gets since none pass this.
+        this.mode3D = options.mode3D;
     }
 
     public wfstCapable(): boolean {
@@ -199,7 +189,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                      const {typeName, urlEndpoint, eventSupport} = this.extractUtils();
                      let postData = "";
                      try {
-                         postData = WFSTQueries.TransactionUpdateRequest2_0_0({typeName, feature: frozenFeature, featureDescription: this.featureTemplate, invertAxes: this.invertAxes});
+                         postData = WFSTQueries.TransactionUpdateRequest2_0_0({typeName, feature: frozenFeature, featureDescription: this.featureTemplate, invertAxes: this.invertAxes, mode3D: this.mode3D});
                      } catch (error) {
                          resolve(null);
                          this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
@@ -268,7 +258,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 }
                 let postData = "";
                 try {
-                    postData = WFSTQueries.TransactionAddRequest2_0_0({typeName, feature: newFeature, featureDescription: this.featureTemplate, invertAxes: this.invertAxes});
+                    postData = WFSTQueries.TransactionAddRequest2_0_0({typeName, feature: newFeature, featureDescription: this.featureTemplate, invertAxes: this.invertAxes, mode3D: this.mode3D});
                 } catch (error) {
                     resolve(null);
                     this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
@@ -433,7 +423,8 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 typeName,
                 lockItem, featureDescription:
                 this.featureTemplate,
-                invertAxes: this.invertAxes
+                invertAxes: this.invertAxes,
+                mode3D: this.mode3D
             });
 
             fetch(urlEndpoint, this.fetchSettingsOptions({

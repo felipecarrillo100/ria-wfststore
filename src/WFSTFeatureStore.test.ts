@@ -7,11 +7,12 @@ import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {bbox} from "@luciad/ria/ogc/filter/FilterFactory";
 import {createBounds, createPoint, createPolygon} from "@luciad/ria/shape/ShapeFactory";
 import {Feature} from "@luciad/ria/model/feature/Feature";
+import {Polygon} from "@luciad/ria/shape/Polygon";
 
 // Real timers are required for this test
 // jest.useFakeTimers();
 
-const OWS_URL = "http://localhost:8081/geoserver/ows";
+const OWS_URL = "http://localhost:8092/geoserver/ows";
 
 
 describe('WFSTFeatureStore ',   () => {
@@ -241,7 +242,55 @@ describe('WFSTFeatureStore (demo call-shape parity)', () => {
     });
 })
 
-async function CreateGeoserverStore(requestedFeatureType?:string) {
+// Closes the loop the unit tests structurally cannot: whether a real WFS-T server (GeoServer +
+// PostGIS), not just our own codec/RIA's decode in isolation, actually accepts and round-trips 3D
+// data through a live Transaction. Uses the dedicated wfst_test:test_features_3d layer (see
+// docker/postgres/init/03-test-features-3d.sql) - PostGIS typed geometry columns are either
+// strictly 2D or strictly 3D, never both (verified empirically: inserting a Z geometry into
+// test_features.geom, which is geometry(Geometry, 4326), fails with "Geometry has Z dimension but
+// column does not"), so 3D data needs its own table/featureType rather than widening the existing
+// 2D one. mode3D:true is passed explicitly on the read-side codec here only (see
+// CreateGeoserverStore) so the query-back step doesn't itself drop Z before we can assert on it -
+// the write side (store.add) always auto-detects correctly regardless.
+describe('WFSTFeatureStore 3D support (live GeoServer round-trip)', () => {
+    it('adds a 3D point and reads back the Z value through a real WFS-T Transaction', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        const feature = new Feature(createPoint(reference, [50, 60, 123]), {label: "3d-point"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        const readBack = cursor.next();
+        expect((readBack.shape as any).z).toBe(123);
+
+        await store.remove(id);
+    });
+
+    it('adds a 3D polygon and reads back Z on every vertex through a real WFS-T Transaction', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        const ring = [
+            [60, 60, 15], [60, 70, 15], [70, 70, 15], [70, 60, 15], [60, 60, 15]
+        ] as any;
+        const feature = new Feature(createPolygon(reference, ring), {label: "3d-polygon"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        const readBack = cursor.next();
+        const polygon = readBack.shape as Polygon;
+        for (let i = 0; i < polygon.pointCount; i++) {
+            expect(polygon.getPoint(i).z).toBe(15);
+        }
+
+        await store.remove(id);
+    });
+});
+
+async function CreateGeoserverStore(requestedFeatureType?:string, overrides?: {mode3D?: boolean}) {
     const {wfsCapabilities, wfstCapabilities} = await WFSCapabilitiesExtended.fromURL(OWS_URL);
     const featureOperation = WFSCapabilitiesExtended.getServiceOperation(wfsCapabilities, "GetFeature");
 
@@ -263,7 +312,8 @@ async function CreateGeoserverStore(requestedFeatureType?:string) {
         wfst: wfstCapabilities.WFSTCapable ? wfstCapabilities.WFSTOperations : undefined,
         generateIDs: false,
         outputFormat,
-        codec: new GeoJsonCodec({generateIDs: false}),
+        codec: new GeoJsonCodec({generateIDs: false, mode3D: overrides?.mode3D}),
+        mode3D: overrides?.mode3D,
         swapAxes: false,
         swapQueryAxes: false,
         serviceURL: serviceURL,

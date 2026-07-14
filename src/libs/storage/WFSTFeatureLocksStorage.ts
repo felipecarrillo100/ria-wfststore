@@ -1,5 +1,5 @@
 import {uniqueId} from "lodash";
-import {WFSTEditFeatureLockItem} from "../../WFSTFeatureStore";
+import {WFSTEditFeatureLockItem} from "../../types/WFSTTypes";
 
 export interface WFSTEditFeatureLockIndexItem {
     id: string;

@@ -1,57 +1,59 @@
+import {PointCoordinates} from "@luciad/ria/shape/PointCoordinate";
+
 export interface GMLPoint {
     type: 'Point';
     id: string;
     srsName: string;
-    coordinates: [number, number];
+    coordinates: PointCoordinates;
 }
 
 interface GMLLineString {
     type: 'LineString';
     id: string;
     srsName: string;
-    coordinates: [number, number][];
+    coordinates: PointCoordinates[];
 }
 
 export interface GMLPolygon {
     type: 'Polygon';
     id: string;
     srsName: string;
-    coordinates: [number, number][][];
+    coordinates: PointCoordinates[][];
 }
 
 interface GMLMultiPolygon {
     type: 'MultiPolygon';
     id: string;
     srsName: string;
-    coordinates: [number, number][][][];
+    coordinates: PointCoordinates[][][];
 }
 
 interface GMLMultiSurface {
     type: 'MultiSurface';
     id: string;
     srsName: string;
-    coordinates: [number, number][][][];
+    coordinates: PointCoordinates[][][];
 }
 
 interface GMLMultiPoint {
     type: 'MultiPoint';
     id: string;
     srsName: string;
-    coordinates: [number, number][];
+    coordinates: PointCoordinates[];
 }
 
 interface GMLMultiLineString {
     type: 'MultiLineString';
     id: string;
     srsName: string;
-    coordinates: [number, number][][];
+    coordinates: PointCoordinates[][];
 }
 
 interface GMLMultiCurve {
     type: 'MultiCurve';
     id: string;
     srsName: string;
-    coordinates: [number, number][][];
+    coordinates: PointCoordinates[][];
 }
 
 export interface GMLMultiGeometry {
