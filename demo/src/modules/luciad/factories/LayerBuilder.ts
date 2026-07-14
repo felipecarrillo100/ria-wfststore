@@ -1,7 +1,9 @@
 import { RIAMap } from '@luciad/ria/view/RIAMap.js'
 import { FeatureLayer } from '@luciad/ria/view/feature/FeatureLayer.js'
+import type { WFSTFeatureLockStore } from 'ria-wfststore'
 import { ModelFactory } from './ModelFactory'
 import { LayerFactory } from './LayerFactory'
+import { createLockedLayer } from '../wfst/EditWithLockHelper'
 
 export interface AddWfsLayerPayload {
   url: string
@@ -19,6 +21,12 @@ export class LayerBuilder {
       hoverable: true,
       wfst: payload.wfst ?? false,
     })
+    map.layerTree.addChild(layer)
+    return layer
+  }
+
+  static addLockLayer(lockStore: WFSTFeatureLockStore, label: string, map: RIAMap): FeatureLayer {
+    const layer = createLockedLayer(lockStore, label)
     map.layerTree.addChild(layer)
     return layer
   }

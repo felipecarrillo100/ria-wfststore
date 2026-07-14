@@ -8,21 +8,9 @@ import TableCell from '@mui/material/TableCell'
 import TableContainer from '@mui/material/TableContainer'
 import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
-import CircularProgress from '@mui/material/CircularProgress'
 import { useFormContainer } from 'react-dockable-desktop'
-import type { RIAMap } from '@luciad/ria/view/RIAMap.js'
-import {
-  WFSTFeatureLockStore,
-  WFSTFeatureLocksStorage,
-  type WFSTEditFeatureLockItem,
-  type WFSTEditFeatureLockIndexItem,
-} from 'ria-wfststore'
-import { createLockedLayer } from '../../../../modules/luciad/wfst/EditWithLockHelper'
-
-interface Props {
-  map: RIAMap
-  onResume: (lockItem: WFSTEditFeatureLockItem, lockStore: WFSTFeatureLockStore, helperLayer: any) => void
-}
+import { WFSTFeatureLocksStorage, type WFSTEditFeatureLockIndexItem } from 'ria-wfststore'
+import { mapCommandBus } from '../../../../mapCommandBus'
 
 function formatRemaining(eol: number): string {
   const remaining = Math.max(0, eol - Date.now())
@@ -36,11 +24,10 @@ function formatRemaining(eol: number): string {
   return `${sec}s`
 }
 
-export function ListAvailableWFSTFeatureLocksForm({ map, onResume }: Props) {
+export function ListAvailableWFSTFeatureLocksForm() {
   const container = useFormContainer()
   const [locks, setLocks] = useState<WFSTEditFeatureLockIndexItem[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [, setTick] = useState(0)
 
   function loadLocks() {
@@ -60,19 +47,10 @@ export function ListAvailableWFSTFeatureLocksForm({ map, onResume }: Props) {
     }
   }, [])
 
-  async function handleResume() {
+  function handleResume() {
     if (!selected) return
-    setLoading(true)
-    try {
-      const lockItem = await WFSTFeatureLocksStorage.getLock(selected)
-      const lockStore = new WFSTFeatureLockStore(lockItem)
-      const helperLayer = createLockedLayer(lockStore, lockItem.lockName)
-      map.layerTree.addChild(helperLayer)
-      onResume(lockItem, lockStore, helperLayer)
-      container.requestClose()
-    } catch {
-      setLoading(false)
-    }
+    mapCommandBus.dispatch({ type: 'OPEN_LOCK_SESSION', payload: { lockId: selected } })
+    container.requestClose()
   }
 
   return (
@@ -120,14 +98,13 @@ export function ListAvailableWFSTFeatureLocksForm({ map, onResume }: Props) {
       )}
 
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-        <Button onClick={() => container.requestClose()} disabled={loading}>
+        <Button onClick={() => container.requestClose()}>
           Cancel
         </Button>
         <Button
           variant="contained"
           onClick={handleResume}
-          disabled={!selected || loading}
-          startIcon={loading ? <CircularProgress size={16} color="inherit" /> : undefined}
+          disabled={!selected}
         >
           Resume Lock
         </Button>

@@ -36,8 +36,7 @@ import { EditWFSTFeaturesWithLockForm } from './forms/feature/wfstlock/EditWFSTF
 import { EditCurrentLockForm } from './forms/feature/wfstlock/EditCurrentLockForm'
 import { ListAvailableWFSTFeatureLocksForm } from './forms/feature/wfstlock/ListAvailableWFSTFeatureLocksForm'
 import { DemoWFSTDelegateScreen } from '../modules/luciad/wfst/DemoWFSTDelegateScreen'
-import { WFSTFeatureStore, WFSTFeatureLockStore, type WFSTEditFeatureLockItem } from 'ria-wfststore'
-import { createLockedLayer } from '../modules/luciad/wfst/EditWithLockHelper'
+import { WFSTFeatureStore, WFSTFeatureLockStore, WFSTFeatureLocksStorage } from 'ria-wfststore'
 import { MapLayersComponent } from './MapLayersComponent'
 import type { DrawTool } from '../types/AppState'
 
@@ -149,69 +148,7 @@ export function MainMapPanel() {
 
     openLeftPanel(
       EditWFSTFeaturesWithLockForm,
-      {
-        features,
-        store,
-        onLockAcquired: (lockItem: WFSTEditFeatureLockItem) => {
-          const map = mapRef.current!
-          const lockStore = new WFSTFeatureLockStore(lockItem)
-          lockStore.setScreenHelper(delegateRef.current)
-          const helperLayer = createLockedLayer(lockStore, layer.label ?? 'Layer')
-
-          helperLayer.onCreateContextMenu = (contextMenu, _layerMap, info) => {
-            const clickedObjects = ((info as any)?.objects ?? []) as Feature[]
-            if (clickedObjects.length === 0) return
-            const feature = clickedObjects[0]
-
-            contextMenu.addItem({
-              id: 'lock-zoom', label: 'Zoom to feature',
-              action: () => {
-                const bounds = feature.shape?.bounds
-                if (bounds) map.mapNavigator.fit({ bounds, animate: true })
-              },
-            })
-            contextMenu.addSeparator()
-            contextMenu.addItem({
-              id: 'lock-edit-geom', label: 'Edit geometry',
-              action: () => openEditGeomRef.current?.(feature, helperLayer),
-            })
-            contextMenu.addItem({
-              id: 'lock-edit-props', label: 'Edit properties',
-              action: () => openModal(
-                EditFeaturePropertiesForm,
-                {
-                  feature,
-                  onSave: (properties: Record<string, unknown>) => {
-                    const updated = new Feature(feature.shape, properties, feature.id)
-                    lockStore.putProperties(updated)
-                  },
-                },
-                { title: 'Edit Properties', size: 'medium' }
-              ),
-            })
-            contextMenu.addSeparator()
-            contextMenu.addItem({
-              id: 'lock-delete', label: 'Delete feature',
-              action: () => lockStore.remove(feature.id),
-            })
-          }
-
-          map.layerTree.addChild(helperLayer)
-
-          setTimeout(() => {
-            openLeftPanel(
-              EditCurrentLockForm,
-              {
-                lockItem,
-                lockStore,
-                helperLayer,
-                map,
-              },
-              { title: 'Lock Session', width: 360 }
-            )
-          }, 333)
-        },
-      },
+      { features, store },
       { title: 'Edit with Lock', width: 360 }
     )
   }
@@ -343,6 +280,63 @@ export function MainMapPanel() {
           })
           .catch((err) => console.error('Failed to add WFS layer:', err))
       }
+      if (cmd.type === 'OPEN_LOCK_SESSION') {
+        const { lockId } = cmd.payload as { lockId: string }
+        WFSTFeatureLocksStorage.getLock(lockId).then((lockItem) => {
+          const lockStore = new WFSTFeatureLockStore(lockItem)
+          lockStore.setScreenHelper(delegateRef.current)
+          const helperLayer = LayerBuilder.addLockLayer(lockStore, lockItem.lockName, map)
+
+          helperLayer.onCreateContextMenu = (contextMenu, _layerMap, info) => {
+            const clickedObjects = ((info as any)?.objects ?? []) as Feature[]
+            if (clickedObjects.length === 0) return
+            const feature = clickedObjects[0]
+
+            contextMenu.addItem({
+              id: 'lock-zoom', label: 'Zoom to feature',
+              action: () => {
+                const bounds = feature.shape?.bounds
+                if (bounds) map.mapNavigator.fit({ bounds, animate: true })
+              },
+            })
+            contextMenu.addSeparator()
+            contextMenu.addItem({
+              id: 'lock-edit-geom', label: 'Edit geometry',
+              action: () => openEditGeomRef.current?.(feature, helperLayer),
+            })
+            contextMenu.addItem({
+              id: 'lock-edit-props', label: 'Edit properties',
+              action: () => openModal(
+                EditFeaturePropertiesForm,
+                {
+                  feature,
+                  onSave: (properties: Record<string, unknown>) => {
+                    const updated = new Feature(feature.shape, properties, feature.id)
+                    lockStore.putProperties(updated)
+                  },
+                },
+                { title: 'Edit Properties', size: 'medium' }
+              ),
+            })
+            contextMenu.addSeparator()
+            contextMenu.addItem({
+              id: 'lock-delete', label: 'Delete feature',
+              action: () => lockStore.remove(feature.id),
+            })
+          }
+
+          setTimeout(() => {
+            openLeftPanel(
+              EditCurrentLockForm,
+              { lockItem, lockStore, helperLayer, map },
+              { title: 'Lock Session', width: 360 }
+            )
+          }, 333)
+        }).catch((err) => {
+          console.error('Failed to open lock session:', err)
+          delegateRef.current?.MessageError('This lock is no longer available. It may have expired or been removed.')
+        })
+      }
       if (cmd.type === 'SET_DRAW_TOOL') {
         const { tool, panelId: targetId } = cmd.payload as { tool: DrawTool; panelId: string }
         if (targetId !== panelId) return
@@ -394,26 +388,7 @@ function MapToolbar({ panelId }: { panelId: string }) {
   }
 
   function handleResumeLock() {
-    if (!map) return
-    openLeftPanel(
-      ListAvailableWFSTFeatureLocksForm,
-      {
-        map,
-        onResume: (lockItem: WFSTEditFeatureLockItem, lockStore: WFSTFeatureLockStore, helperLayer: any) => {
-          openLeftPanel(
-            EditCurrentLockForm,
-            {
-              lockItem,
-              lockStore,
-              helperLayer,
-              map,
-            },
-            { title: 'Lock Session', width: 360 }
-          )
-        },
-      },
-      { title: 'Available Locks', width: 360 }
-    )
+    openLeftPanel(ListAvailableWFSTFeatureLocksForm, {}, { title: 'Available Locks', width: 360 })
   }
 
   return (

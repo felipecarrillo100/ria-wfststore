@@ -10,7 +10,7 @@ export default defineConfig({
       // Only needed because the lib is loaded from a sibling dir in local dev;
       // published npm consumers share one node_modules naturally.
       '@luciad/ria': path.resolve(__dirname, 'node_modules/@luciad/ria'),
-      'ria-wfststore': path.resolve(__dirname, '../lib/index.mjs'),
+      'ria-wfststore': path.resolve(__dirname, '../lib/index.js'),
     },
   },
 })

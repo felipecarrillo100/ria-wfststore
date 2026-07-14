@@ -15,6 +15,7 @@ import Alert from '@mui/material/Alert'
 import { useFormContainer } from 'react-dockable-desktop'
 import type { Feature } from '@luciad/ria/model/feature/Feature.js'
 import { WFSTFeatureStore, WFSTFeatureLocksStorage, type WFSTEditFeatureLockItem } from 'ria-wfststore'
+import { mapCommandBus } from '../../../../mapCommandBus'
 
 const DURATION_OPTIONS = [
   { label: '1 minute',  value: 1 },
@@ -31,10 +32,9 @@ const DURATION_OPTIONS = [
 interface Props {
   features: Feature[]
   store: WFSTFeatureStore
-  onLockAcquired: (lockItem: WFSTEditFeatureLockItem) => void
 }
 
-export function EditWFSTFeaturesWithLockForm({ features, store, onLockAcquired }: Props) {
+export function EditWFSTFeaturesWithLockForm({ features, store }: Props) {
   const container = useFormContainer()
   const [lockName, setLockName] = useState(() => `Lock-${new Date().toLocaleTimeString()}`)
   const [expiry, setExpiry] = useState(5)
@@ -70,7 +70,7 @@ export function EditWFSTFeaturesWithLockForm({ features, store, onLockAcquired }
     }
 
     container.requestClose()
-    onLockAcquired(acquiredItem!)
+    mapCommandBus.dispatch({ type: 'OPEN_LOCK_SESSION', payload: { lockId: acquiredItem!.id! } })
   }
 
   return (
