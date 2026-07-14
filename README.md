@@ -24,12 +24,13 @@ npm run build
 Then you can publish the package to npm or other repository
 
 ## To test
-Some test have been added that runs using nodejs using Jest. No browser test is available at the moment.
-The test uses isomorphic-fetch to provide fetch in node testing with jest.
+Some tests have been added that run using vitest. No browser test is available at the moment.
+
+The tests run against a real WFS-T server. A disposable local one (PostGIS + GeoServer) is provided under [`docker/`](docker/README.md) — start it with `docker compose -f docker/docker-compose.yml up -d`, then run:
 ```
 npm run test
 ```
-Test use the sever-side implementations, use GeoServer of LuciadFusion 
+See [docker/README.md](docker/README.md) for details on the local server (layers, credentials, resetting state).
 
 
 ## To install in your project

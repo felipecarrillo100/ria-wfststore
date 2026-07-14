@@ -17,7 +17,7 @@ describe('WFSTFeatureStore ',   () => {
     let newFeature = null;
 
     it('WFSTFeatureStore.query features', async () => {
-        const {store} = await CreateGeoserverStore();
+        const {store} = await CreateGeoserverStore("wfst_test:states");
         const bounds = createBounds(getReference("CRS:84"), [-180, 360, -90, 180]);
         const query = {
             "filter": bbox(bounds),
@@ -27,7 +27,7 @@ describe('WFSTFeatureStore ',   () => {
         return store.query(query).then(cursor => {
             if (cursor.hasNext()) {
                 const feature = cursor.next();
-                expect(feature.id).toBe("boundary_lines.1");
+                expect(feature.id).toBe("states.1");
             } else {
                 expect(2).toBe(3);
             }
@@ -37,12 +37,12 @@ describe('WFSTFeatureStore ',   () => {
     });
 
     it('WFSTFeatureStore.querybyId', async () => {
-        const {store} = await CreateGeoserverStore();
+        const {store} = await CreateGeoserverStore("wfst_test:states");
 
-        return store.queryByRids(["boundary_lines.1"]).then(cursor => {
+        return store.queryByRids(["states.1"]).then(cursor => {
             if (cursor.hasNext()) {
                 const feature = cursor.next();
-                expect(feature.id).toBe("boundary_lines.1");
+                expect(feature.id).toBe("states.1");
             } else {
                 expect(2).toBe(3);
             }
@@ -52,7 +52,7 @@ describe('WFSTFeatureStore ',   () => {
     });
 
     it('WFSTFeatureStore.add', async () => {
-        const {store, reference} = await CreateGeoserverStore("luciad:europe_untouched");
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features");
 
         const shape = createPolygon(reference, [
             [9.80319279537696 ,37.449454109042925 ],
@@ -63,13 +63,12 @@ describe('WFSTFeatureStore ',   () => {
         ]);
 
         newFeature = new Feature(shape, {
-            country: "Tunisia",
-            abbrf: "TU"
+            label: "Tunisia"
         }, 1);
 
         return store.add(newFeature).then(featureId => {
             if (featureId) {
-                const prefix = "europe_untouched";
+                const prefix = "test_features";
                 console.log(featureId);
                 targetID = featureId;
                 expect(featureId).toMatch(new RegExp(`^${prefix}?`));
@@ -82,10 +81,10 @@ describe('WFSTFeatureStore ',   () => {
     });
 
     it('WFSTFeatureStore.putProperties', async () => {
-        const {store, reference} = await CreateGeoserverStore("luciad:europe_untouched");
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features");
         if (newFeature) {
             const shape = createPoint(newFeature.shape.reference, [0,0]);
-            const updatedFeature = new Feature(shape, {...newFeature.properties, country:"Carthage"}, targetID);
+            const updatedFeature = new Feature(shape, {...newFeature.properties, label:"Carthage"}, targetID);
             return store.putProperties(updatedFeature).then(result => {
                 expect(result).toBe(targetID);
             }, () => {
@@ -97,7 +96,7 @@ describe('WFSTFeatureStore ',   () => {
     });
 
     it('WFSTFeatureStore.put (Geometry)', async () => {
-        const {store, reference} = await CreateGeoserverStore("luciad:europe_untouched");
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features");
         if (newFeature) {
             const shape = createPolygon(reference, [
                 [9.80319279537696 + 20 , 37.449454109042925 ],
@@ -119,7 +118,7 @@ describe('WFSTFeatureStore ',   () => {
     });
 
     it('WFSTFeatureStore.remove', async () => {
-        const {store, reference} = await CreateGeoserverStore("luciad:europe_untouched");
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features");
 
         return store.remove(targetID).then(result => {
             expect(result).toBe(true);
@@ -130,7 +129,7 @@ describe('WFSTFeatureStore ',   () => {
 })
 
 async function CreateGeoserverStore(requestedFeatureType?:string) {
-    const {wfsCapabilities, wfstCapabilities} = await WFSCapabilitiesExtended.fromURL("http://leu-gsp-vrndp06:8080/geoserver/ows");
+    const {wfsCapabilities, wfstCapabilities} = await WFSCapabilitiesExtended.fromURL("http://localhost:8081/geoserver/ows");
     const featureOperation = WFSCapabilitiesExtended.getServiceOperation(wfsCapabilities, "GetFeature");
 
     const serviceURL = WFSCapabilitiesExtended.getServiceUrl(featureOperation, "GET");

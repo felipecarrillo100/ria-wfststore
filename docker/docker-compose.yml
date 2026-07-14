@@ -1,0 +1,82 @@
+services:
+  postgis:
+    # postgis/postgis has no arm64 build; imresamu/postgis is a multi-arch (amd64+arm64)
+    # drop-in built on the same official postgres:alpine base.
+    image: imresamu/postgis:17-3.5-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  states-loader:
+    image: ghcr.io/osgeo/gdal:ubuntu-small-3.12.4
+    depends_on:
+      postgis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data:ro
+    entrypoint: ["ogr2ogr"]
+    command:
+      - "-f"
+      - "PostgreSQL"
+      - "PG:host=postgis port=5432 dbname=${POSTGRES_DB} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}"
+      - "/data/states.json"
+      - "-nln"
+      - "states"
+      - "-nlt"
+      - "MULTIPOLYGON"
+      - "-lco"
+      - "GEOMETRY_NAME=geom"
+      - "-lco"
+      - "FID=id"
+      - "-t_srs"
+      - "EPSG:4326"
+      - "-overwrite"
+    restart: "no"
+
+  geoserver:
+    image: kartoza/geoserver:2.28.4
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD}
+      CORS_ENABLED: "true"
+      INITIAL_MEMORY: 512M
+      MAXIMUM_MEMORY: 1G
+    ports:
+      - "${GEOSERVER_PORT}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail -s http://localhost:8080/geoserver/web/ -o /dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  geoserver-bootstrap:
+    build: ./bootstrap
+    depends_on:
+      geoserver:
+        condition: service_healthy
+      states-loader:
+        condition: service_completed_successfully
+    environment:
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD}
+      GEOSERVER_WORKSPACE: ${GEOSERVER_WORKSPACE}
+      GEOSERVER_DATASTORE: ${GEOSERVER_DATASTORE}
+      PGHOST: postgis
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    restart: "no"
