@@ -6,7 +6,7 @@ import {getReference} from "@luciad/ria/reference/ReferenceProvider";
 import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {AdvancedGMLCodec} from "./libs/gml/gml32/AdvancedGMLCodec";
 import {bbox} from "@luciad/ria/ogc/filter/FilterFactory";
-import {createBounds, createCircularArcByCenterPoint, createPoint, createPolygon, createShapeList} from "@luciad/ria/shape/ShapeFactory";
+import {createBounds, createCircularArcByCenterPoint, createPoint, createPolygon, createPolyline, createShapeList} from "@luciad/ria/shape/ShapeFactory";
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {Polygon} from "@luciad/ria/shape/Polygon";
 import {Cursor} from "@luciad/ria/model/Cursor";
@@ -596,6 +596,43 @@ describe('WFSTFeatureStore custom request headers / basic auth (secured layer)',
 // 2D one. mode3D:true is passed explicitly on the read-side codec here only (see
 // CreateGeoserverStore) so the query-back step doesn't itself drop Z before we can assert on it -
 // the write side (store.add) always auto-detects correctly regardless.
+// Generic, tolerance-based "are these two features close enough" comparator - a real WFS-T round
+// trip through GML/GeoJSON text serialization can introduce tiny floating-point drift that exact
+// equality would flag as a false failure. Tolerance defaults tight (1e-6): no reprojection is
+// happening in any of these tests (same reference in and out), unlike the circular-shape/3-point-
+// circle cases elsewhere in this codebase that legitimately need a much looser, percentage-based
+// tolerance for genuine geometric approximation error.
+function expectFeaturesCloseEnough(original: Feature, decoded: Feature | null, tolerance = 1e-6) {
+    expect(decoded).not.toBeNull();
+    expect(decoded.properties).toEqual(original.properties);
+    expectShapesCloseEnough(original.shape as any, decoded.shape as any, tolerance);
+}
+
+function expectShapesCloseEnough(original: any, decoded: any, tolerance: number) {
+    expect(decoded).not.toBeNull();
+    if (typeof original.shapeCount === "number") {
+        expect(decoded.shapeCount).toBe(original.shapeCount);
+        for (let i = 0; i < original.shapeCount; i++) {
+            expectShapesCloseEnough(original.getShape(i), decoded.getShape(i), tolerance);
+        }
+        return;
+    }
+    if (typeof original.pointCount === "number") {
+        expect(decoded.pointCount).toBe(original.pointCount);
+        for (let i = 0; i < original.pointCount; i++) {
+            expectPointsCloseEnough(original.getPoint(i), decoded.getPoint(i), tolerance);
+        }
+        return;
+    }
+    expectPointsCloseEnough(original, decoded, tolerance);
+}
+
+function expectPointsCloseEnough(a: any, b: any, tolerance: number) {
+    expect(Math.abs(a.x - b.x)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs((a.z ?? 0) - (b.z ?? 0))).toBeLessThanOrEqual(tolerance);
+}
+
 describe('WFSTFeatureStore 3D support (live GeoServer round-trip)', () => {
     it('adds a 3D point and reads back the Z value through a real WFS-T Transaction', async () => {
         const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
@@ -629,6 +666,107 @@ describe('WFSTFeatureStore 3D support (live GeoServer round-trip)', () => {
         for (let i = 0; i < polygon.pointCount; i++) {
             expect(polygon.getPoint(i).z).toBe(15);
         }
+
+        await store.remove(id);
+    });
+
+    it('adds a 3D LineString (distinct X/Y/Z per vertex) and reads back a close-enough feature', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        const points = [[10, 10, 5], [20, 15, 25], [30, 5, 8]] as any;
+        const feature = new Feature(createPolyline(reference, points), {label: "3d-line"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expectFeaturesCloseEnough(feature, cursor.next());
+
+        await store.remove(id);
+    });
+
+    it('adds a 3D MultiPoint (ShapeList of Points, distinct Z each) and reads back a close-enough feature', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        const shapeList = createShapeList(reference, [
+            createPoint(reference, [40, 40, 2]),
+            createPoint(reference, [41, 41, 9]),
+            createPoint(reference, [42, 40, 17]),
+        ]);
+        const feature = new Feature(shapeList, {label: "3d-multipoint"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expectFeaturesCloseEnough(feature, cursor.next());
+
+        await store.remove(id);
+    });
+
+    it('adds a 3D MultiCurve (ShapeList of Polylines, distinct Z per vertex) and reads back a close-enough feature', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        const shapeList = createShapeList(reference, [
+            createPolyline(reference, [[50, 50, 3], [51, 51, 6]] as any),
+            createPolyline(reference, [[55, 55, 11], [56, 56, 14], [57, 55, 20]] as any),
+        ]);
+        const feature = new Feature(shapeList, {label: "3d-multicurve"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expectFeaturesCloseEnough(feature, cursor.next());
+
+        await store.remove(id);
+    });
+
+    // Tilted-plane case: 2 adjacent vertices at Z=A, the other 2 at Z=B - a valid inclined plane
+    // (Z = A + (B-A)*y/10 here), not just the flat/horizontal case the existing polygon test
+    // above already covers. Genuinely unverified going in (per the user's own framing) - not an
+    // assumed-safe case.
+    it('adds a 3D Polygon on a tilted (non-horizontal) plane and reads back a close-enough feature', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        // No repeated closing coordinate: RIA's Polygon implicitly closes the ring, and a
+        // round-tripped feature comes back de-duplicated - feeding a redundant closing point in
+        // here would just make the *original* (never touching the network) report a pointCount
+        // one higher than any decoded feature ever would, which isn't a real discrepancy to catch.
+        const ring = [
+            [80, 80, 100], [90, 80, 100], [90, 90, 140], [80, 90, 140]
+        ] as any;
+        const feature = new Feature(createPolygon(reference, ring), {label: "3d-tilted-polygon"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expectFeaturesCloseEnough(feature, cursor.next());
+
+        await store.remove(id);
+    });
+
+    // Coplanar within each polygon (flat/horizontal), but distinct heights between the two
+    // polygons in the collection - more coverage than the single-polygon, single-height test
+    // above, without attempting a shape LuciadRIA's own model doesn't support.
+    it('adds a 3D MultiSurface (two flat polygons at different heights) and reads back a close-enough feature', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        // Y (latitude, geodetic reference) must stay within [-90, 90] - RIA's own Polygon clamps
+        // out-of-range latitude silently (documented in Polygon.d.ts), which would otherwise
+        // collapse adjacent vertices together and masquerade as a "lost vertex" round-trip bug.
+        const shapeList = createShapeList(reference, [
+            createPolygon(reference, [[10, 10, 10], [20, 10, 10], [20, 20, 10], [10, 20, 10]] as any),
+            createPolygon(reference, [[30, 10, 50], [40, 10, 50], [40, 20, 50], [30, 20, 50]] as any),
+        ]);
+        const feature = new Feature(shapeList, {label: "3d-multisurface"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expectFeaturesCloseEnough(feature, cursor.next());
 
         await store.remove(id);
     });

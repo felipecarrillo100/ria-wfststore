@@ -25,7 +25,7 @@ interface FeatureType {
 
 export function WFSConnectForm() {
   // const [url, setUrl] = useState('https://sampleservices.luciad.com/wfs');
-  const [url, setUrl] = useState('http://localhost:8081/ogc/wfs/states');
+  const [url, setUrl] = useState('http://localhost:8081/ogc/wfs/demo_curves');
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
