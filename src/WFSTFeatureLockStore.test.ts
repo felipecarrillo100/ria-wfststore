@@ -107,4 +107,48 @@ describe('WFSTFeatureLockStore (demo call-shape parity)', () => {
 
         await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {}); // EditCurrentLockForm.tsx:278,281
     });
+
+    // Two real bugs identified during architecture review, reproduced here before fixing.
+    it('remove() splices insertedIds at the correct index, not the unrelated updatedIndex', async () => {
+        const {storageId, retrieved} = await acquireLock("remove-bug");
+        const lockStore = new WFSTFeatureLockStore(retrieved);
+        await waitFor(() => (lockStore as any).query().hasNext());
+
+        const featureA = new Feature(createPoint(lockStore.getReference(), [1, 1]), {label: "A"}, 101);
+        const featureB = new Feature(createPoint(lockStore.getReference(), [2, 2]), {label: "B"}, 102);
+        const idA = lockStore.add(featureA);
+        const idB = lockStore.add(featureB);
+        expect((lockStore as any).options.insertedIds.map((e: any) => e.id)).toEqual([idA, idB]);
+
+        // idA sits at insertedIndex 0, with updatedIds empty (updatedIndex always -1 here). The bug
+        // spliced insertedIds at updatedIndex (-1, i.e. the last element) instead of insertedIndex,
+        // so removing A incorrectly deleted B and left A behind.
+        lockStore.remove(idA);
+
+        const remainingIds = (lockStore as any).options.insertedIds.map((e: any) => e.id);
+        expect(remainingIds).toEqual([idB]);
+
+        await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
+    });
+
+    it('put() updates insertedIds even when the feature sits at index 0', async () => {
+        const {storageId, retrieved} = await acquireLock("put-falsy-zero-bug");
+        const lockStore = new WFSTFeatureLockStore(retrieved);
+        await waitFor(() => (lockStore as any).query().hasNext());
+
+        const feature = new Feature(createPoint(lockStore.getReference(), [3, 3]), {label: "original"}, 201);
+        const id = lockStore.add(feature);
+        expect((lockStore as any).options.insertedIds.findIndex((e: any) => e.id === id)).toBe(0);
+
+        // insertedIndex is 0 here - "else if (insertedIndex)" treats 0 as falsy and skips the
+        // assignment entirely, so the edit below never reaches insertedIds and would be silently
+        // dropped from the eventual WFS-T commit despite super.put() updating the local MemoryStore.
+        const editedFeature = new Feature(createPoint(lockStore.getReference(), [3, 3]), {label: "edited"}, id);
+        lockStore.put(editedFeature);
+
+        const trackedEntry = (lockStore as any).options.insertedIds.find((e: any) => e.id === id);
+        expect(JSON.parse(trackedEntry.feature).properties.label).toBe("edited");
+
+        await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
+    });
 });

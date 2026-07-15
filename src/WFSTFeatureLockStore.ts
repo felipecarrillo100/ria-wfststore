@@ -46,7 +46,7 @@ export class WFSTFeatureLockStore extends MemoryStore {
             this.options.updatedIds.splice(updatedIndex, 1);
             if (deletedIndex===-1) this.options.deletedIds.push(id);
         } else if (insertedIndex>-1) {
-            this.options.insertedIds.splice(updatedIndex, 1);
+            this.options.insertedIds.splice(insertedIndex, 1);
         }
         WFSTFeatureLocksStorage.replaceLock(this.options)
         return super.remove(id);
@@ -83,7 +83,7 @@ export class WFSTFeatureLockStore extends MemoryStore {
         } else if (updatedIndex>-1) {
             newFeature.onlyProperties = newFeature.onlyProperties && onlyProperties;
             this.options.updatedIds[updatedIndex]  = newFeature;
-        } else if (insertedIndex) {
+        } else if (insertedIndex > -1) {
             this.options.insertedIds[insertedIndex]  = newFeature;
         }
         WFSTFeatureLocksStorage.replaceLock(this.options)
