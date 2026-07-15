@@ -502,6 +502,15 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         return typeName;
     }
 
+    // RIA's own WFSFeatureStore has a working getReference() at runtime but never declares it in
+    // its own public API (WFSFeatureStore.d.ts) - callers relying on it were silently depending on
+    // an undocumented implementation detail, untyped and unchecked. Declaring it here shadows that
+    // and gives it a real, typed, public contract - also brings this class into parity with
+    // WFSTFeatureLockStore, which already has its own getReference().
+    getReference(): CoordinateReference {
+        return this.extractUtils().reference;
+    }
+
 
     public getFeatureWithLock(options: {rids: string[], expiry?: number}) {
         return new Promise<WFSTEditGetFeatureWithLockItem>((resolve, reject)=>{
