@@ -126,60 +126,40 @@ export class GMLFeatureEncoder {
                     featureAsJson.geometry.geometries = this.decomposeGeometries(featureAsJson.geometry);
                 }
             }
-            if (this.wrapToMultiSurface) {
-                if (featureAsJson.geometry.type === "Polygon") {
-                    featureAsJson.geometry = {
-                            id: "aMultiSurface",
-                        // @ts-ignore
-                            type: this.targetGeometry,
-                            srsName: normalizeSrsName(featureAsJson.geometry.srsName),
-                        // @ts-ignore
-                           coordinates: [featureAsJson.geometry.coordinates]
-                        };
-                } else {
-                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
-                    if (featureAsJson.geometry.type === "MultiPolygon") {
-                        // @ts-ignore
-                        featureAsJson.geometry.type = this.targetGeometry;
-                    }
-                }
-            }
-            if (this.wrapToMultiCurve) {
-                if (featureAsJson.geometry.type === "LineString") {
-                    featureAsJson.geometry = {
-                        id: "aMultiCurve",
-                        // @ts-ignore
-                        type: this.targetGeometry,
-                        srsName: normalizeSrsName(featureAsJson.geometry.srsName),
-                        // @ts-ignore
-                        coordinates: [featureAsJson.geometry.coordinates]
-                    };
-                } else {
-                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
-                    if (featureAsJson.geometry.type === "MultiLineString") {
-                        // @ts-ignore
-                        featureAsJson.geometry.type = this.targetGeometry;
-                    }
-                }
-            }
-            if (this.wrapToMultiPoint) {
-                if (featureAsJson.geometry.type === "Point") {
-                    featureAsJson.geometry = {
-                        id: "aMultiPoint",
-                        // @ts-ignore
-                        type: "MultiPoint",
-                        srsName: normalizeSrsName(featureAsJson.geometry.srsName),
-                        // @ts-ignore
-                        coordinates: [featureAsJson.geometry.coordinates]
-                    };
-                } else {
-                    featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
-                }
-            }
+            this.wrapSingleToMulti(featureAsJson, this.wrapToMultiSurface, "Polygon", "MultiPolygon", "aMultiSurface", this.targetGeometry);
+            this.wrapSingleToMulti(featureAsJson, this.wrapToMultiCurve, "LineString", "MultiLineString", "aMultiCurve", this.targetGeometry);
+            this.wrapSingleToMulti(featureAsJson, this.wrapToMultiPoint, "Point", "MultiPoint", "aMultiPoint", "MultiPoint");
             featureAsJson.geometry = normalizeGMLGeometry(featureAsJson.geometry);
             return featureAsJson;
         }
         return null;
+    }
+
+    // Shared shape of wrapToMultiSurface/wrapToMultiCurve/wrapToMultiPoint: wrap a lone
+    // `singleType` geometry into a single-member Multi* structure, or - if it's already a
+    // `multiTypeName` - just remap its "type" to the GML type name the server actually
+    // advertises (e.g. GeoJSON's "MultiPolygon" -> GML's "MultiSurface").
+    private wrapSingleToMulti(
+        featureAsJson: GMLFeature, enabled: boolean, singleType: string, multiTypeName: string,
+        wrapId: string, wrapType: string
+    ): void {
+        if (!enabled) return;
+        if (featureAsJson.geometry.type === singleType) {
+            featureAsJson.geometry = {
+                id: wrapId,
+                // @ts-ignore
+                type: wrapType,
+                srsName: normalizeSrsName(featureAsJson.geometry.srsName),
+                // @ts-ignore
+                coordinates: [featureAsJson.geometry.coordinates]
+            };
+        } else {
+            featureAsJson.geometry.srsName = normalizeSrsName(featureAsJson.geometry.srsName);
+            if (featureAsJson.geometry.type === multiTypeName) {
+                // @ts-ignore
+                featureAsJson.geometry.type = wrapType;
+            }
+        }
     }
 
     private decomposeGeometries = (geometry: GMLGeometry): any => {
