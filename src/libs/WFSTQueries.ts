@@ -1,11 +1,9 @@
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {GMLFeatureEncoder} from "./GMLFeatureEncoder";
-import {GMLGeometryTypeKey, GMLGeometryTypeToGeometry, WFSFeatureDescription} from "./ParseWFSFeatureDescription";
+import {GMLGeometryTypeKey, WFSFeatureDescription} from "./ParseWFSFeatureDescription";
 import {create} from "xmlbuilder2";
-import {WFSTInvalidGeometry} from "./WFSTInvalidGeometry";
-import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
-import {getReference} from "@luciad/ria/reference/ReferenceProvider";
 import {WFSTEditFeatureLockItem} from "../types/WFSTTypes";
+import {decodeStoredJSONFeature, verifyGeometryCompatibilityOrThrowError} from "./WFSTFeaturePreparation";
 
 interface WFSTAddUpdateRequestOptions {
     typeName: string;
@@ -103,7 +101,7 @@ ${this.singleAdd2_0_0(options)}
         const targetGeometry = options.featureDescription.geometry.type as GMLGeometryTypeKey;
         const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes, mode3D: options.mode3D});
         const {geometry, geometryType} = gmlEncoder.encodeFeature(options.feature);
-        this.verifyGeometryCompatibilityOrThrowError(geometryType, targetGeometry);
+        verifyGeometryCompatibilityOrThrowError(geometryType, targetGeometry);
         const split = options.typeName.split(":");
         const typeNameMin = split.length > 1 ? split[1] : split[0];
         const tns = options.featureDescription.tns ? options.featureDescription.tns : (split.length > 1 ? split[0] : null);
@@ -116,11 +114,6 @@ ${this.singleAdd2_0_0(options)}
       ${properties}
     </tns:${typeNameMin}>
   </wfs:Insert>`;
-    }
-
-    private static verifyGeometryCompatibilityOrThrowError(geometry: string, targetGeometry: GMLGeometryTypeKey) {
-        if (GMLGeometryTypeToGeometry(targetGeometry) === "Geometry") return;
-        if (geometry !== GMLGeometryTypeToGeometry(targetGeometry)) throw new WFSTInvalidGeometry(`${targetGeometry}`);
     }
 
     private static prettyPrint(xmlContent: string, pretty = false) {
@@ -154,7 +147,7 @@ ${this.singleUpdate2_0_0(options)}
             const targetGeometry = options.featureDescription.geometry.type as GMLGeometryTypeKey;
             const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes, mode3D: options.mode3D});
             const {geometry, geometryType} = gmlEncoder.encodeFeature(options.feature);
-            this.verifyGeometryCompatibilityOrThrowError(geometryType, targetGeometry);
+            verifyGeometryCompatibilityOrThrowError(geometryType, targetGeometry);
             const geometryName = options.featureDescription.geometry.name;
             geometryContent = `<wfs:Property>
         <wfs:ValueReference>${geometryName}</wfs:ValueReference>
@@ -203,18 +196,6 @@ ${this.singleUpdate2_0_0(options)}
     }
 
 
-    private static encodeJSONFeatureHelper(jsonFeature: string, srsName: string): Feature {
-        const reference = getReference(srsName);
-        // mode3D:true: this must stay symmetric with GMLFeatureEncoder's own internal codecs, or Z
-        // gets silently dropped here, one hop before the feature is re-encoded for the WFS-T request.
-        const jsonDecoder = new GeoJsonCodec({generateIDs: false, reference, mode3D: true});
-        const cursor = jsonDecoder.decode({content: jsonFeature, contentType:"application/json"});
-        if (cursor.hasNext()) {
-            return cursor.next() as Feature;
-        } else {
-            return null;
-        }
-    }
     public static TransactionCommitLock_2_0_0(options: WFSTCommitLockTransaction ) {
         const deletedItems = options.lockItem.deletedIds.map(element=> this.singleDelete2_0_0(
             {
@@ -225,7 +206,7 @@ ${this.singleUpdate2_0_0(options)}
         // Avoid sending geometry when only properties changed (onlyProperties boolean)
         const updatedItems = options.lockItem.updatedIds.map(element=> this.singleUpdate2_0_0({
             typeName: options.typeName,
-            feature: this.encodeJSONFeatureHelper(element.feature, options.lockItem.srsName),
+            feature: decodeStoredJSONFeature(element.feature, options.lockItem.srsName),
             featureDescription: options.featureDescription,
             onlyProperties: element.onlyProperties,
             prettyPrint: options.prettyPrint,
@@ -234,7 +215,7 @@ ${this.singleUpdate2_0_0(options)}
         }));
         const insertedItems = options.lockItem.insertedIds.map(element=> this.singleAdd2_0_0({
             typeName: options.typeName,
-            feature: this.encodeJSONFeatureHelper(element.feature, options.lockItem.srsName),
+            feature: decodeStoredJSONFeature(element.feature, options.lockItem.srsName),
             featureDescription: options.featureDescription,
             prettyPrint: options.prettyPrint,
             invertAxes: options.invertAxes,
