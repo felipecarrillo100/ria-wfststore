@@ -98,9 +98,101 @@ grant_anonymous_write "test_features"
 grant_anonymous_write "lock_features"
 grant_anonymous_write "test_features_3d"
 
+SECURED_WORKSPACE="wfst_secured"
+SECURED_DATASTORE="geodata_secured"
+SECURED_ROLE="WFST_SECURED_ROLE"
+SECURED_USER="wfst_secured_user"
+SECURED_PASSWORD="wfst_secured_pass"
+
+log "Setting up password-protected workspace $SECURED_WORKSPACE (see docker/README.md)"
+
+if [ "$(http_status "$GS_URL/rest/workspaces/$SECURED_WORKSPACE.json")" != "200" ]; then
+  log "Creating workspace $SECURED_WORKSPACE"
+  curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" \
+    -d "{\"workspace\":{\"name\":\"$SECURED_WORKSPACE\"}}" \
+    "$GS_URL/rest/workspaces"
+else
+  log "Workspace $SECURED_WORKSPACE already exists"
+fi
+
+if [ "$(http_status "$GS_URL/rest/workspaces/$SECURED_WORKSPACE/datastores/$SECURED_DATASTORE.json")" != "200" ]; then
+  log "Creating datastore $SECURED_DATASTORE (same $PGDATABASE database as $DATASTORE)"
+  curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" -d @- \
+    "$GS_URL/rest/workspaces/$SECURED_WORKSPACE/datastores" <<JSON
+{
+  "dataStore": {
+    "name": "$SECURED_DATASTORE",
+    "connectionParameters": {
+      "entry": [
+        {"@key": "host", "\$": "postgis"},
+        {"@key": "port", "\$": "5432"},
+        {"@key": "database", "\$": "$PGDATABASE"},
+        {"@key": "schema", "\$": "public"},
+        {"@key": "user", "\$": "$PGUSER"},
+        {"@key": "passwd", "\$": "$PGPASSWORD"},
+        {"@key": "dbtype", "\$": "postgis"},
+        {"@key": "validate connections", "\$": "true"}
+      ]
+    }
+  }
+}
+JSON
+else
+  log "Datastore $SECURED_DATASTORE already exists"
+fi
+
+if [ "$(http_status "$GS_URL/rest/workspaces/$SECURED_WORKSPACE/datastores/$SECURED_DATASTORE/featuretypes/secured_features.json")" != "200" ]; then
+  log "Publishing featuretype secured_features"
+  curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" \
+    -d "{\"featureType\":{\"name\":\"secured_features\",\"nativeName\":\"secured_features\",\"title\":\"Password-protected scratch layer\",\"srs\":\"EPSG:4326\",\"enabled\":true}}" \
+    "$GS_URL/rest/workspaces/$SECURED_WORKSPACE/datastores/$SECURED_DATASTORE/featuretypes"
+else
+  log "Featuretype secured_features already published"
+fi
+
+if curl -sf -u "$AUTH" "$GS_URL/rest/security/roles.json" | grep -q "\"$SECURED_ROLE\""; then
+  log "Role $SECURED_ROLE already exists"
+else
+  log "Creating role $SECURED_ROLE"
+  curl -sf -u "$AUTH" -X POST "$GS_URL/rest/security/roles/role/$SECURED_ROLE"
+fi
+
+if curl -sf -u "$AUTH" "$GS_URL/rest/security/usergroup/users.json" | grep -q "\"userName\":\"$SECURED_USER\""; then
+  log "User $SECURED_USER already exists"
+else
+  log "Creating user $SECURED_USER"
+  curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" \
+    -d "{\"user\":{\"userName\":\"$SECURED_USER\",\"password\":\"$SECURED_PASSWORD\",\"enabled\":true}}" \
+    "$GS_URL/rest/security/usergroup/users"
+fi
+
+if curl -sf -u "$AUTH" "$GS_URL/rest/security/roles/user/$SECURED_USER.json" | grep -q "\"$SECURED_ROLE\""; then
+  log "Role $SECURED_ROLE already associated with $SECURED_USER"
+else
+  log "Associating role $SECURED_ROLE with user $SECURED_USER"
+  curl -sf -u "$AUTH" -X POST "$GS_URL/rest/security/roles/role/$SECURED_ROLE/user/$SECURED_USER"
+fi
+
+log "Restricting $SECURED_WORKSPACE.secured_features to role $SECURED_ROLE (read + write) - this workspace is kept entirely separate from $WORKSPACE so this ACL rule can never affect the anonymous-access layers above"
+set_secured_acl_rule() {
+  local mode="$1" # r or w
+  local acl_json
+  acl_json="$(curl -sf -u "$AUTH" "$GS_URL/rest/security/acl/layers.json")"
+  local method=POST
+  if echo "$acl_json" | grep -q "\"$SECURED_WORKSPACE.secured_features.$mode\""; then
+    method=PUT
+  fi
+  curl -sf -u "$AUTH" -X "$method" -H "Content-Type: application/json" \
+    -d "{\"$SECURED_WORKSPACE.secured_features.$mode\":\"$SECURED_ROLE\"}" \
+    "$GS_URL/rest/security/acl/layers"
+}
+set_secured_acl_rule "r"
+set_secured_acl_rule "w"
+
 log "Truncating scratch tables so they always start empty"
 psql -c "TRUNCATE TABLE test_features RESTART IDENTITY;"
 psql -c "TRUNCATE TABLE lock_features RESTART IDENTITY;"
 psql -c "TRUNCATE TABLE test_features_3d RESTART IDENTITY;"
+psql -c "TRUNCATE TABLE secured_features RESTART IDENTITY;"
 
-log "Bootstrap complete: $WORKSPACE:states, $WORKSPACE:test_features, $WORKSPACE:lock_features and $WORKSPACE:test_features_3d are ready as WFS-T layers."
+log "Bootstrap complete: $WORKSPACE:states, $WORKSPACE:test_features, $WORKSPACE:lock_features, $WORKSPACE:test_features_3d and $SECURED_WORKSPACE:secured_features (password-protected) are ready as WFS-T layers."

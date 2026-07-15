@@ -33,6 +33,17 @@ Workspace `wfst_test`, PostGIS datastore `geodata`, and these WFS-T layers:
   Kept as its own table rather than widening `test_features`: PostGIS typed geometry columns are
   either strictly 2D or strictly 3D, never both — see the comment in
   `docker/postgres/init/03-test-features-3d.sql`.
+* **`wfst_secured:secured_features`** — password-protected layer used to verify RIA's
+  `requestHeaders` option (Basic Auth) works end to end, both for `createFromURL_WFST`'s
+  capabilities discovery and for the store's own GetFeature/Transaction requests. Deliberately
+  kept in its own workspace (`wfst_secured`) and datastore (`geodata_secured`, pointing at the
+  same `geodata` PostGIS database as `geodata`), rather than inside `wfst_test`, so its
+  restrictive ACL rule can never affect the anonymous-access layers above. Read+write are
+  restricted to role `WFST_SECURED_ROLE`, held by user `wfst_secured_user` / `wfst_secured_pass`.
+  An unauthenticated request to this layer isn't a classic 401 challenge — GeoServer hides the
+  layer entirely (`GetCapabilities` omits it, `GetFeature` returns "Feature type ... unknown");
+  a 401 only occurs when credentials are actually supplied but wrong. See
+  `src/WFSTFeatureStore.test.ts`'s `'custom request headers / basic auth (secured layer)'` suite.
 
 `docker/bootstrap/bootstrap.sh` does this over the GeoServer REST API and is idempotent — safe to
 re-run.
@@ -45,14 +56,14 @@ docker compose -f docker/docker-compose.yml down -v
 docker compose -f docker/docker-compose.yml up -d
 ```
 This reloads all 51 states and empties the scratch tables again. The bootstrap script also
-truncates `test_features`, `lock_features` and `test_features_3d` on every startup, so a plain `up`
-(without `down` first) also starts with empty scratch tables even if the containers were left
-running.
+truncates `test_features`, `lock_features`, `test_features_3d` and `secured_features` on every
+startup, so a plain `up` (without `down` first) also starts with empty scratch tables even if the
+containers were left running.
 
 ## Notes
 
 * GeoServer's default security ACL restricts writes to admin roles; the bootstrap script grants
-  anonymous read+write specifically on the two `wfst_test` layers. Don't expose this stack beyond
-  localhost.
+  anonymous read+write specifically on the `wfst_test` layers, and restricts `wfst_secured` to its
+  own dedicated role instead. Don't expose this stack beyond localhost.
 * `postgis/postgis` has no arm64 build, so this uses `imresamu/postgis` (a multi-arch drop-in) on
   Apple Silicon / arm64 hosts.

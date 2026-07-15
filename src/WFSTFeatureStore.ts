@@ -86,7 +86,10 @@ export class WFSTFeatureStore extends WFSFeatureStore {
     public static createFromCapabilities_WFST(extended: WFSCapabilitiesExtendedResult, typeName:string, options: WFSFeatureStoreCreateOptions = {}) {
         const wfsCapabilities = extended.wfsCapabilities;
         const wfst = extended.wfstCapabilities.WFSTOperations;
-        const match = wfsCapabilities.featureTypes.filter((featureType => featureType.name === typeName))[0];
+        // featureTypes is null (not []) when the capabilities document omits <FeatureTypeList>
+        // entirely - which GeoServer does when the caller can see zero feature types (e.g. an
+        // ACL-secured workspace requested anonymously), rather than emitting an empty list.
+        const match = (wfsCapabilities.featureTypes || []).filter((featureType => featureType.name === typeName))[0];
         if (typeof match === "undefined") throw new ProgrammingError(`there is no feature type "${typeName}" in capabilities`);
         const {reference, srsName} = getReferenceForWFS(match, options.reference);
         const getFeatureRequests = wfsCapabilities.operations.filter((operation => "GetFeature" === operation.name))[0].supportedRequests;
@@ -142,32 +145,18 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                     this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
                     return;
                 }
-                fetch(urlEndpoint, this.fetchSettingsOptions({
-                    method: 'POST',
-                    headers: {
-                        'Accept': 'text/xml',
-                        'Content-Type': 'text/xml'
-                    },
-                    body: postData
-                })).then(response=>{
-                    if (response.status===200) {
-                        response.text().then(xmlText=>{
-                            const { totalUpdated, resourceId} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
-                            if (Number(totalUpdated)===0) {
-                                this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
-                                resolve(null);
-                            } else {
-                                //  Workaround was removed
-                                if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
-                                eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
-                                resolve(feature.id);
-                                this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
-                            }
-                        });
-                    } else this.handleOtherHttpErrors(response, resolve)
-                }).catch(error => {
-                    resolve(null);
-                    this.errorUnknown(error);
+                this.postXMLTransaction(urlEndpoint, postData, resolve, xmlText => {
+                    const { totalUpdated, resourceId} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
+                    if (Number(totalUpdated)===0) {
+                        this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
+                        resolve(null);
+                    } else {
+                        //  Workaround was removed
+                        if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
+                        eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
+                        resolve(feature.id);
+                        this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
+                    }
                 });
             }
             // If feature template not available then load it!
@@ -195,32 +184,18 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                          this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
                          return;
                      }
-                     fetch(urlEndpoint, this.fetchSettingsOptions({
-                         method: 'POST',
-                         headers: {
-                             'Accept': 'text/xml',
-                             'Content-Type': 'text/xml'
-                         },
-                         body: postData
-                     })).then(response=>{
-                         if (response.status===200) {
-                             response.text().then(xmlText=>{
-                                 const { totalUpdated, resourceId} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
-                                 if (Number(totalUpdated)===0) {
-                                     this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
-                                     resolve(null);
-                                 } else {
-                                     // Workaround removed
-                                     if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
-                                     eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
-                                     resolve(feature.id);
-                                     this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
-                                 }
-                             });
-                         } else this.handleOtherHttpErrors(response, resolve)
-                     }).catch(error => {
-                         resolve(null);
-                         this.errorUnknown(error);
+                     this.postXMLTransaction(urlEndpoint, postData, resolve, xmlText => {
+                         const { totalUpdated, resourceId} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
+                         if (Number(totalUpdated)===0) {
+                             this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
+                             resolve(null);
+                         } else {
+                             // Workaround removed
+                             if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
+                             eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
+                             resolve(feature.id);
+                             this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
+                         }
                      });
                  }
                  // If feature template not available then load it!
@@ -264,44 +239,21 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                     this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
                     return;
                 }
-                fetch(urlEndpoint, this.fetchSettingsOptions({
-                    method: 'POST',
-                    headers: {
-                        'Accept': 'text/xml',
-                        'Content-Type': 'text/xml'
-                    },
-                    body: postData
-                })).then(response=>{
-                    if (response.status===200) {
-                        response.text().then(xmlText=>{
-                            const {resourceId, totalInserted} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
-                            if (Number(totalInserted)===0) {
-                                this.delegateScreen.MessageWarning(`[WFS-T] Total inserted: ${totalInserted}`);
-                                resolve(null);
-                            } else {
-                                newFeature.id = resourceId;
-                                eventSupport.emit("StoreChanged",  "add", newFeature, resourceId);
-                                resolve(resourceId)
-                                this.delegateScreen.MessageSuccess(`[WFS-T] Total inserted: ${totalInserted}`);
-                            }
-                        });
-                    } else if (response.status === 401) {
+                this.postXMLTransaction(urlEndpoint, postData, resolve, xmlText => {
+                    const {resourceId, totalInserted} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
+                    if (Number(totalInserted)===0) {
+                        this.delegateScreen.MessageWarning(`[WFS-T] Total inserted: ${totalInserted}`);
                         resolve(null);
-                        this.error401();
-                    } else if (response.status === 500) {
-                        resolve(null);
-                        this.error500();
-                    } else if (response.status === 400) {
-                        resolve(null);
-                        this.error400(response);
-                        this.delegateScreen.EditNewFeatureProperties(newFeature, this);
                     } else {
-                        resolve(null);
-                        this.errorOther(response);
+                        newFeature.id = resourceId;
+                        eventSupport.emit("StoreChanged",  "add", newFeature, resourceId);
+                        resolve(resourceId)
+                        this.delegateScreen.MessageSuccess(`[WFS-T] Total inserted: ${totalInserted}`);
                     }
-                }).catch(error => {
-                    resolve(null);
-                    this.errorUnknown(error);
+                }, {
+                    // 400 also needs the extra EditNewFeatureProperties call that the other
+                    // non-OK statuses don't - handleOtherHttpErrors' on400 hook covers exactly this.
+                    onNonOk: response => this.handleOtherHttpErrors(response, resolve, () => this.delegateScreen.EditNewFeatureProperties(newFeature, this))
                 });
             }
             // If feature template not available then load it!
@@ -337,27 +289,13 @@ export class WFSTFeatureStore extends WFSFeatureStore {
             const {typeName, urlEndpoint} = this.extractUtils();
 
             const postData = WFSTQueries.TransactionQueryByIds_2_0_0({typeName, rids, outputFormat: this.options.outputFormat});
-            fetch(urlEndpoint, this.fetchSettingsOptions({
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/xml',
-                    'Content-Type': 'text/xml'
-                },
-                body: postData
-            })).then(response=>{
-                if (response.status===200) {
-                    response.text().then(textXml=>{
-                        try {
-                            const cursor = this.options.codec.decode({content: textXml});
-                            resolve(cursor);
-                        } catch (err) {
-                            resolve(null);
-                        }
-                    });
-                } else this.handleOtherHttpErrors(response, resolve);
-            }).catch(error =>{
-                resolve(null);
-                this.errorUnknown(error);
+            this.postXMLTransaction(urlEndpoint, postData, resolve, textXml => {
+                try {
+                    const cursor = this.options.codec.decode({content: textXml});
+                    resolve(cursor);
+                } catch (err) {
+                    resolve(null);
+                }
             });
         })
     }
@@ -392,25 +330,17 @@ export class WFSTFeatureStore extends WFSFeatureStore {
 
             const postData = WFSTQueries.TransactionDeleteRequest2_0_0({typeName, rid});
 
-            fetch(urlEndpoint, this.fetchSettingsOptions({
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/xml',
-                    'Content-Type': 'text/xml'
-                },
-                body: postData
-            })).then(response=>{
-                if (response.status===200) {
-                    response.text().then(textXml=>{
-                        const {totalDeleted} = WFSTResponses.parseXMLTransactionResponseResourceId(textXml);
-                        eventSupport.emit("StoreChanged", "remove", undefined, rid);
-                        resolve(true);
-                        this.delegateScreen.MessageSuccess(`[WFS-T] Total deleted: ${totalDeleted}` );
-                    });
-                } else this.handleOtherHttpErrors(response, resolve);
-        }).catch(error =>{
-                resolve(false);
-                this.errorUnknown(error);
+            this.postXMLTransaction(urlEndpoint, postData, resolve, textXml => {
+                const {totalDeleted} = WFSTResponses.parseXMLTransactionResponseResourceId(textXml);
+                eventSupport.emit("StoreChanged", "remove", undefined, rid);
+                resolve(true);
+                this.delegateScreen.MessageSuccess(`[WFS-T] Total deleted: ${totalDeleted}` );
+            }, {
+                // Unlike every other call site, remove()'s network-error path resolves false, not null.
+                onNetworkError: error => {
+                    resolve(false);
+                    this.errorUnknown(error);
+                }
             });
         })
     }
@@ -427,51 +357,37 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 mode3D: this.mode3D
             });
 
-            fetch(urlEndpoint, this.fetchSettingsOptions({
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/xml',
-                    'Content-Type': 'text/xml'
-                },
-                body: postData
-            })).then(response=>{
-                if (response.status===200) {
-                    response.text().then(xmlText=>{
-                        const {totalInserted, totalUpdated, totalDeleted, totalReplaced} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
-                        const message = [];
-                        const result : CommitLockTransactionResult = {
-                            success: true,
-                            totalInserted:0,
-                            totalUpdated:0,
-                            totalDeleted: 0,
-                            totalReplaced: 0,
-                            totalChanges: 0,
-                        }
-                        if (totalInserted) {
-                            message.push(`Total inserted: ${totalInserted}.`);
-                            result.totalInserted = Number(totalInserted);
-                        }
-                        if (totalUpdated) {
-                            message.push(`Total updated: ${totalUpdated}.`);
-                            result.totalUpdated = Number(totalUpdated);
-                        }
-                        if (totalReplaced) {
-                            message.push(`Total replaced: ${totalReplaced}.`);
-                            result.totalReplaced = Number(totalReplaced);
-                        }
-                        if (totalDeleted) {
-                            message.push(`Total deleted: ${totalDeleted}.`);
-                            result.totalDeleted = Number(totalDeleted);
-                        }
-                        result.totalChanges = result.totalReplaced + result.totalInserted + result.totalDeleted+ result.totalUpdated;
-                        const toastMessage = this.delegateScreen.createToastList("[WFS-T]", message);
-                        this.delegateScreen.MessageInfo(toastMessage as any);
-                        resolve(result);
-                    });
-                } else this.handleOtherHttpErrors(response, resolve);
-            }).catch(error =>{
-                resolve(null);
-                this.errorUnknown(error);
+            this.postXMLTransaction(urlEndpoint, postData, resolve, xmlText => {
+                const {totalInserted, totalUpdated, totalDeleted, totalReplaced} = WFSTResponses.parseXMLTransactionResponseResourceId(xmlText);
+                const message = [];
+                const result : CommitLockTransactionResult = {
+                    success: true,
+                    totalInserted:0,
+                    totalUpdated:0,
+                    totalDeleted: 0,
+                    totalReplaced: 0,
+                    totalChanges: 0,
+                }
+                if (totalInserted) {
+                    message.push(`Total inserted: ${totalInserted}.`);
+                    result.totalInserted = Number(totalInserted);
+                }
+                if (totalUpdated) {
+                    message.push(`Total updated: ${totalUpdated}.`);
+                    result.totalUpdated = Number(totalUpdated);
+                }
+                if (totalReplaced) {
+                    message.push(`Total replaced: ${totalReplaced}.`);
+                    result.totalReplaced = Number(totalReplaced);
+                }
+                if (totalDeleted) {
+                    message.push(`Total deleted: ${totalDeleted}.`);
+                    result.totalDeleted = Number(totalDeleted);
+                }
+                result.totalChanges = result.totalReplaced + result.totalInserted + result.totalDeleted+ result.totalUpdated;
+                const toastMessage = this.delegateScreen.createToastList("[WFS-T]", message);
+                this.delegateScreen.MessageInfo(toastMessage as any);
+                resolve(result);
             });
         })
     }
@@ -480,20 +396,15 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         return new Promise<WFSFeatureDescription>((resolve) => {
             const {typeName, urlEndpoint, preferredVersion} = this.extractUtils();
             const request = `${urlEndpoint}?REQUEST=DescribeFeatureType&SERVICE=WFS&VERSION=${preferredVersion}&typeNames=${typeName}`;
-            fetch(request, this.fetchSettingsOptions({
-                method: 'GET',
-                headers: {
-                    'Accept': 'text/xml',
-                }
-            })).then(response=>{
-                if (response.status===200) {
-                    response.text().then((xmlText)=>{
-                        const featureTemplate =  parseWFSFeatureDescription(xmlText);
-                        this.setFeatureTemplate(featureTemplate);
-                        resolve (featureTemplate);
-                    });
-                } else this.handleOtherHttpErrors(response, resolve);
-            }).catch(error => {console.log('error', error)});
+            this.request(request, {method: 'GET', headers: {'Accept': 'text/xml'}}, resolve, xmlText => {
+                const featureTemplate =  parseWFSFeatureDescription(xmlText);
+                this.setFeatureTemplate(featureTemplate);
+                resolve (featureTemplate);
+            }, {
+                // Unlike every other call site, this one never resolves on a network error - the
+                // returned Promise is left pending. Preserved exactly as-is; not this slice's job to fix.
+                onNetworkError: error => {console.log('error', error)}
+            });
         })
     }
 
@@ -557,37 +468,23 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 reject();
                 return;
             }
-            fetch(urlEndpoint, this.fetchSettingsOptions({
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/xml',
-                    'Content-Type': 'text/xml'
-                },
-                body: postData
-            })).then(response=>{
-                if (response.status===200) {
-                    response.text().then(xmlText=>{
-                        const info = WFSTResponses.parseXMLGetFeaturesWithLock(xmlText);
-                        resolve({
-                            lockId: info.lockId,
-                            numberMatched: Number(info.numberMatched),
-                            numberReturned: Number(info.numberReturned),
-                            timeStamp: info.timeStamp,
-                            expiry: options.expiry ? options.expiry : 5,
-                            lockName: "",
-                            srsName: reference.identifier,
-                         //   rawData: xmlText,
-                            unchangedIds: options.rids,
-                            updatedIds: [],
-                            insertedIds: [],
-                            deletedIds: [],
-                            storeSettings: this.cleanOptions()
-                        });
-                    });
-                } else this.handleOtherHttpErrors(response, resolve);
-            }).catch(error => {
-                resolve(null);
-                this.errorUnknown(error);
+            this.postXMLTransaction(urlEndpoint, postData, resolve, xmlText => {
+                const info = WFSTResponses.parseXMLGetFeaturesWithLock(xmlText);
+                resolve({
+                    lockId: info.lockId,
+                    numberMatched: Number(info.numberMatched),
+                    numberReturned: Number(info.numberReturned),
+                    timeStamp: info.timeStamp,
+                    expiry: options.expiry ? options.expiry : 5,
+                    lockName: "",
+                    srsName: reference.identifier,
+                 //   rawData: xmlText,
+                    unchangedIds: options.rids,
+                    updatedIds: [],
+                    insertedIds: [],
+                    deletedIds: [],
+                    storeSettings: this.cleanOptions()
+                });
             });
         })
     }
@@ -603,33 +500,19 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 reject();
                 return;
             }
-            fetch(urlEndpoint, this.fetchSettingsOptions({
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/xml',
-                    'Content-Type': 'text/xml'
-                },
-                body: postData
-            })).then(response=>{
-                if (response.status===200) {
-                    response.text().then(xmlText=>{
-                        const info = WFSTResponses.parseXMLLockFeatures(xmlText);
-                        resolve({
-                            lockId: info.lockId,
-                            expiry: options.expiry ? options.expiry : 5,
-                            lockName: "",
-                            srsName: reference.identifier,
-                            unchangedIds: options.rids,
-                            updatedIds: [],
-                            insertedIds: [],
-                            deletedIds: [],
-                            storeSettings: this.cleanOptions()
-                        });
-                    });
-                } else this.handleOtherHttpErrors(response, resolve);
-            }).catch(error => {
-                resolve(null);
-                this.errorUnknown(error);
+            this.postXMLTransaction(urlEndpoint, postData, resolve, xmlText => {
+                const info = WFSTResponses.parseXMLLockFeatures(xmlText);
+                resolve({
+                    lockId: info.lockId,
+                    expiry: options.expiry ? options.expiry : 5,
+                    lockName: "",
+                    srsName: reference.identifier,
+                    unchangedIds: options.rids,
+                    updatedIds: [],
+                    insertedIds: [],
+                    deletedIds: [],
+                    storeSettings: this.cleanOptions()
+                });
             });
         })
     }
@@ -638,7 +521,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         return {...this.options, codec: undefined, reference: undefined};
     }
 
-    private handleOtherHttpErrors(response: Response, resolve: (value: (PromiseLike<unknown> | unknown)) => void) {
+    private handleOtherHttpErrors(response: Response, resolve: (value: (PromiseLike<unknown> | unknown)) => void, on400?: (response: Response) => void) {
         if (response.status === 401) {
             resolve(null);
             this.error401();
@@ -648,10 +531,66 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         } else if (response.status === 400) {
             resolve(null);
             this.error400(response);
+            on400?.(response);
         } else {
             resolve(null);
             this.errorOther(response);
         }
+    }
+
+    // Shared by every method below: fetch, branch on status 200 vs other (defaulting to
+    // handleOtherHttpErrors), and catch network errors (defaulting to resolve(null) + errorUnknown).
+    // Call-site-specific behavior (a custom 400 handler, a different catch resolve value, or no
+    // resolve at all on network error) is expressed via the optional overrides, not by duplicating
+    // this whole shape again.
+    private request(
+        url: string,
+        fetchOptions: FetchSettingsOptions,
+        resolve: (value: (PromiseLike<unknown> | unknown)) => void,
+        onSuccess: (xmlText: string) => void,
+        overrides?: {
+            onNonOk?: (response: Response) => void;
+            onNetworkError?: (error: unknown) => void;
+        }
+    ): void {
+        fetch(url, this.fetchSettingsOptions(fetchOptions)).then(response => {
+            if (response.status === 200) {
+                response.text().then(onSuccess);
+            } else if (overrides?.onNonOk) {
+                overrides.onNonOk(response);
+            } else {
+                this.handleOtherHttpErrors(response, resolve);
+            }
+        }).catch(error => {
+            if (overrides?.onNetworkError) {
+                overrides.onNetworkError(error);
+            } else {
+                resolve(null);
+                this.errorUnknown(error);
+            }
+        });
+    }
+
+    // Convenience wrapper for the common case: a WFS-T POST request with an XML body, which is
+    // every fetch call site in this class except loadFeatureDescription's GET.
+    private postXMLTransaction(
+        urlEndpoint: string,
+        postData: string,
+        resolve: (value: (PromiseLike<unknown> | unknown)) => void,
+        onSuccess: (xmlText: string) => void,
+        overrides?: {
+            onNonOk?: (response: Response) => void;
+            onNetworkError?: (error: unknown) => void;
+        }
+    ): void {
+        this.request(urlEndpoint, {
+            method: 'POST',
+            headers: {
+                'Accept': 'text/xml',
+                'Content-Type': 'text/xml'
+            },
+            body: postData
+        }, resolve, onSuccess, overrides);
     }
 
     public getWFSStoreidentity() {

@@ -242,6 +242,181 @@ describe('WFSTFeatureStore (demo call-shape parity)', () => {
     });
 })
 
+// Backfilled coverage: the transport/error-branching logic in WFSTFeatureStore.ts (401/500/400/
+// network-error handling, and the two call-site-specific overrides - add()'s extra
+// EditNewFeatureProperties call on 400, remove()'s network-error-resolves-false) was just
+// centralized into a shared helper, but none of it was actually exercised by any existing test -
+// every test above only reaches the happy (200) path against the real server. Mocking fetch here
+// is the right tool for this specific concern: it's our own control-flow being tested, not real
+// server behavior, which the rest of this file already covers thoroughly.
+describe('WFSTFeatureStore transport error handling', () => {
+    async function warmedUpStore() {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features");
+        // Populates featureTemplate via a real request, so the mocked call below (added per-test)
+        // is the only fetch call intercepted - add()/put()/remove() all skip straight past their
+        // own internal loadFeatureDescription() once featureTemplate is already set.
+        await store.loadFeatureDescription();
+        return store;
+    }
+
+    it('401 response resolves null and reports via delegateScreen.MessageError', async () => {
+        const store = await warmedUpStore();
+        const messageError = vi.fn();
+        class SpyScreenHelper extends WFSTDelegateScreenHelper {
+            MessageError(s: string) { messageError(s); }
+        }
+        store.setScreenHelper(new SpyScreenHelper());
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({status: 401} as Response);
+        const feature = new Feature(createPoint(store.getReference(), [1, 1]), {label: "x"}, 1);
+        const result = await store.put(feature);
+
+        expect(result).toBeNull();
+        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('Unauthorized'));
+        fetchSpy.mockRestore();
+    });
+
+    it('add(): a 400 response triggers EditNewFeatureProperties in addition to the standard error message', async () => {
+        const store = await warmedUpStore();
+        const messageError = vi.fn();
+        const editNewFeatureHandler = vi.fn();
+        class SpyScreenHelper extends WFSTDelegateScreenHelper {
+            MessageError(s: string) { messageError(s); }
+            EditNewFeatureProperties(feature: Feature, storeArg: WFSTFeatureStore) { editNewFeatureHandler(feature, storeArg); }
+        }
+        store.setScreenHelper(new SpyScreenHelper());
+
+        const fakeResponse = {
+            status: 400,
+            text: () => Promise.resolve(
+                '<ows:ExceptionReport xmlns:ows="http://www.opengis.net/ows/1.1">' +
+                '<ows:Exception exceptionCode="InvalidParameterValue">' +
+                '<ows:ExceptionText>bad request</ows:ExceptionText>' +
+                '</ows:Exception></ows:ExceptionReport>'
+            )
+        };
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(fakeResponse as Response);
+        const feature = new Feature(createPoint(store.getReference(), [1, 1]), {label: "x"}, 1);
+        const result = await store.add(feature);
+
+        expect(result).toBeNull();
+        // EditNewFeatureProperties fires synchronously as part of resolve(); MessageError fires
+        // from error400()'s own response.text().then() chain, a separate, later microtask - wait
+        // for it rather than asserting immediately after the outer promise settles.
+        expect(editNewFeatureHandler).toHaveBeenCalledTimes(1);
+        expect(editNewFeatureHandler.mock.calls[0][1]).toBe(store);
+        await vi.waitFor(() => expect(messageError).toHaveBeenCalledWith(expect.stringContaining('InvalidParameterValue')));
+        fetchSpy.mockRestore();
+    });
+
+    it('remove(): a network error resolves false, not null (the one call site that intentionally differs)', async () => {
+        const store = await warmedUpStore();
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network down'));
+
+        const result = await store.remove(1);
+
+        expect(result).toBe(false);
+        fetchSpy.mockRestore();
+    });
+
+    it('loadFeatureDescription(): a network error is logged but the call site never resolves/rejects (pre-existing, unchanged)', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features");
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network down'));
+
+        let settled = false;
+        store.loadFeatureDescription().then(() => { settled = true; }, () => { settled = true; });
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        expect(settled).toBe(false);
+        expect(consoleLog).toHaveBeenCalledWith('error', expect.any(Error));
+        fetchSpy.mockRestore();
+        consoleLog.mockRestore();
+    });
+});
+
+// Verifies requestHeaders - the standard LuciadRIA mechanism for attaching custom HTTP headers to
+// every request a store makes (as opposed to browser-native credentials:true/cookie auth) -
+// actually reaches a real, password-protected WFS-T service end to end: both the initial
+// GetCapabilities/DescribeFeatureType discovery inside createFromURL_WFST, and the later
+// GetFeature/Transaction calls. wfst_secured:secured_features (see docker/bootstrap/bootstrap.sh)
+// requires role WFST_SECURED_ROLE for both read and write; every other layer's ACL is untouched.
+describe('WFSTFeatureStore custom request headers / basic auth (secured layer)', () => {
+    const SECURED_URL = "http://localhost:8092/geoserver/wfst_secured/ows";
+    const SECURED_TYPE_NAME = "wfst_secured:secured_features";
+
+    function basicAuthHeader(username: string, password: string): string {
+        return 'Basic ' + btoa(`${username}:${password}`);
+    }
+
+    it('reads and writes through a password-protected layer using requestHeaders (createFromURL_WFST)', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(SECURED_URL, SECURED_TYPE_NAME, {
+            requestHeaders: {Authorization: basicAuthHeader('wfst_secured_user', 'wfst_secured_pass')},
+            codec: new GeoJsonCodec({generateIDs: false})
+        });
+        const reference = store.getReference();
+
+        const feature = new Feature(createPoint(reference, [4, 4]), {label: "secured-round-trip"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expect(cursor.next().properties.label).toBe("secured-round-trip");
+
+        const removed = await store.remove(id as string);
+        expect(removed).toBe(true);
+    });
+
+    // createFromURL_WFST is a convenience wrapper: fetch capabilities (with requestHeaders) ->
+    // resolve serviceURL/reference/etc from them -> construct WFSTFeatureStore internally. Building
+    // the store directly via `new WFSTFeatureStore(...)` skips that capabilities-fetch step entirely,
+    // so this proves requestHeaders is honored by the store's own per-request path (fetchSettingsOptions),
+    // not merely forwarded through the capabilities convenience method.
+    it('reads and writes through a password-protected layer using requestHeaders (direct constructor)', async () => {
+        const reference = getReference("EPSG:4326");
+        const store = new WFSTFeatureStore({
+            wfst: {Transaction: true} as any,
+            generateIDs: false,
+            outputFormat: "application/json",
+            codec: new GeoJsonCodec({generateIDs: false}),
+            swapAxes: false,
+            swapQueryAxes: false,
+            serviceURL: "http://localhost:8092/geoserver/wfst_secured/wfs",
+            postServiceURL: "http://localhost:8092/geoserver/wfst_secured/wfs",
+            reference,
+            typeName: SECURED_TYPE_NAME,
+            versions: ["2.0.0" as any],
+            credentials: false,
+            requestHeaders: {Authorization: basicAuthHeader('wfst_secured_user', 'wfst_secured_pass')},
+            methods: ["POST", "GET"]
+        } as any);
+
+        const feature = new Feature(createPoint(reference, [5, 5]), {label: "secured-round-trip-ctor"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        expect(cursor.next().properties.label).toBe("secured-round-trip-ctor");
+
+        const removed = await store.remove(id as string);
+        expect(removed).toBe(true);
+    });
+
+    it('without any credentials, GetCapabilities succeeds but the secured layer is hidden - not discoverable at all', async () => {
+        await expect(WFSTFeatureStore.createFromURL_WFST(SECURED_URL, SECURED_TYPE_NAME)).rejects.toThrow(
+            /no feature type/i
+        );
+    });
+
+    it('with wrong credentials, the GetCapabilities request itself is rejected (401)', async () => {
+        await expect(WFSTFeatureStore.createFromURL_WFST(SECURED_URL, SECURED_TYPE_NAME, {
+            requestHeaders: {Authorization: basicAuthHeader('wfst_secured_user', 'WRONG_PASSWORD')}
+        })).rejects.toThrow();
+    });
+});
+
 // Closes the loop the unit tests structurally cannot: whether a real WFS-T server (GeoServer +
 // PostGIS), not just our own codec/RIA's decode in isolation, actually accepts and round-trips 3D
 // data through a live Transaction. Uses the dedicated wfst_test:test_features_3d layer (see
