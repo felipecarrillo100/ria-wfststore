@@ -224,7 +224,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
             const {typeName, urlEndpoint, eventSupport} = this.extractUtils();
             const addFeature = () => {
                 const {newFeature, validProperties} = standardizeProperties(this.featureTemplate, feature);
-                const {geometryType} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
+                const geometryType = GMLFeatureEncoder.getGeometryTypeName(feature);
 
                 const template = this.getFeatureTemplate();
                 const isCompatibleGeometry = areCompatibleGeometries(geometryType as any, template.geometry.type);

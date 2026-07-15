@@ -5,7 +5,7 @@ import {encodeFeatureToGML, GMLFeature} from "./gml/gml32/encodeFeatureToGML";
 import {GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry} from "./ParseWFSFeatureDescription";
 import {GMLGeometry, GMLGeometryTypeNames} from "./gml/gml32/GMLGeometry";
 import {normalizeGMLGeometry, normalizeSrsName} from "./gml/gml32/normalizeGMLGeometry";
-import {tryBuildCircularGeometryJSON} from "./gml/gml32/encodeCircularShapeToJSON";
+import {detectCircularShapeTypeName, tryBuildCircularGeometryJSON} from "./gml/gml32/encodeCircularShapeToJSON";
 
 // mode3D:true unconditionally: this is an internal Feature<->JSON transport format, never inspected
 // directly by anything outside this file, so it should always preserve Z faithfully. Whether the
@@ -110,6 +110,17 @@ export class GMLFeatureEncoder {
         }
         const geometryType = geoJSONFeature.geometry.type;
         return {content: result.content, contentType: result.contentType, srsName: srsName, geometryType};
+    }
+
+    // Circle/Arc have no GeoJSON representation - encodeFeatureToGeoJSON's geoJSONCodec.encode()
+    // throws outright on them - so a caller that only needs the geometry TYPE NAME (e.g. a
+    // schema-compatibility pre-check before the real GML encoding even runs) must not go through
+    // it unconditionally, or it crashes before ever reaching the encoder that actually handles
+    // these two shapes.
+    public static getGeometryTypeName(feature: Feature): string {
+        const circularTypeName = feature.shape ? detectCircularShapeTypeName(feature.shape) : null;
+        if (circularTypeName) return circularTypeName;
+        return GMLFeatureEncoder.encodeFeatureToGeoJSON(feature).geometryType;
     }
 
     // Perhaps needed in the future: srsName

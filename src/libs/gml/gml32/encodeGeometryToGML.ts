@@ -195,15 +195,9 @@ export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeomet
             const segmentElement = curveElement.ele('gml:segments').ele('gml:ArcByCenterPoint');
             segmentElement.ele('gml:pos').txt(invertCoordinates(geometry.center)).up();
             segmentElement.ele('gml:radius', {uom: 'm'}).txt(`${geometry.radius}`).up();
-            const {startAngle, endAngle, isFullCircle} = compassAzimuthSweepToMathAngles(geometry.startAzimuth, geometry.sweepAngle);
+            const {startAngle, endAngle} = compassAzimuthSweepToMathAngles(geometry.startAzimuth, geometry.sweepAngle);
             segmentElement.ele('gml:startAngle', {uom: 'deg'}).txt(`${startAngle}`).up();
-            // Omitted, not written as startAngle===endAngle: GMLGeometryParser.js treats a
-            // missing endAngle as "full circle", the same outcome its own 0-degree-sweep
-            // (startAngle===endAngle) case produces - so this is the lossless choice, and avoids
-            // ever emitting a degenerate zero-length arc when a full sweep was intended.
-            if (!isFullCircle) {
-                segmentElement.ele('gml:endAngle', {uom: 'deg'}).txt(`${endAngle}`).up();
-            }
+            segmentElement.ele('gml:endAngle', {uom: 'deg'}).txt(`${endAngle}`).up();
             break;
         }
         case 'MultiGeometry':
@@ -273,18 +267,42 @@ function norm360(degrees: number): number {
     return ((degrees % 360) + 360) % 360;
 }
 
-// Inverse of GMLGeometryParser.js's ArcByCenterPoint decoding: that code computes
-// startAzimuth = norm360(90 - startAngle) and, when both startAngle/endAngle are given,
-// sweepAngle = -norm360(endAngle - startAngle) (with a 0-degree delta mapped to -360, i.e. a
-// full circle, identical to what an omitted endAngle produces). This inverts both steps exactly.
+// GMLGeometryParser.js's ArcByCenterPoint decoding always walks from startAngle to endAngle in the
+// mathematically-increasing (counterclockwise) direction: startAzimuth = norm360(90 - startAngle),
+// and sweepAngle = -norm360(endAngle - startAngle) (a 0-degree delta mapping to -360, i.e. a full
+// circle, identical to what an omitted endAngle produces). Crucially, that CCW-only walk means a
+// (startAngle, endAngle) pair can only ever represent ONE of the two arcs between those two points
+// (the minor one or the major one, depending which point is labelled "start") - it cannot encode
+// "go the other way around". Naively placing the shape's own start point at GML's startAngle and
+// computing endAngle by adding the (always non-negative) CCW delta therefore only reproduces the
+// original arc when sweepAngle was already <= 0 (RIA's own compass convention, where negative
+// means counterclockwise, i.e. already the direction this walk assumes) - for a positive
+// (clockwise) sweepAngle it silently reproduces the *complementary* arc instead (same two
+// endpoints, but the other side of the circle). Confirmed empirically: encoding startAzimuth=30,
+// sweepAngle=200 and decoding the result back gives a shape with a visibly different bounding box
+// than the original (see AdvancedGMLCodec.test.ts). The fix: for a positive sweepAngle, swap which
+// of the two endpoints gets labelled GML's "start" vs "end", so the CCW walk still traces the
+// correct side. This means a decoded positive-sweep Arc/CircularArc comes back with a different
+// (but geometrically equivalent - same band, same curve) startAzimuth/sweepAngle pair: RIA's own
+// decode range for sweepAngle is always (-360, 0], so an originally-positive sweep can never be
+// echoed back verbatim, only as its geometrically-correct negative-sweep restatement.
 function compassAzimuthSweepToMathAngles(
     startAzimuth: number, sweepAngle: number
-): {startAngle: number, endAngle: number, isFullCircle: boolean} {
-    const startAngle = norm360(90 - startAzimuth);
+): {startAngle: number, endAngle: number} {
+    const startPointAngle = norm360(90 - startAzimuth);
     const isFullCircle = norm360(sweepAngle) === 0; // covers 0, ±360, ±720, ...
-    if (isFullCircle) return {startAngle, endAngle: startAngle, isFullCircle: true};
-    const mathSweep = norm360(-sweepAngle);
-    return {startAngle, endAngle: norm360(startAngle + mathSweep), isFullCircle: false};
+    // A full circle is always written as an explicit startAngle+360 endAngle, never omitted.
+    // RIA's own GMLGeometryParser.js treats a missing endAngle as "full circle" and decodes
+    // startAngle+360 identically (norm360 reduces it before subtracting either way), so this is
+    // lossless for RIA - but not every GML consumer shares that "absent = full circle"
+    // convention. Confirmed against a live LuciadFusion WFS-T service: omitting endAngle for a
+    // full-sweep Insert was NOT interpreted as a full circle - it silently produced a 270-degree
+    // arc instead. An explicit, unambiguous endAngle round-trips correctly through both.
+    if (isFullCircle) return {startAngle: startPointAngle, endAngle: startPointAngle + 360};
+    const endPointAngle = norm360(startPointAngle - sweepAngle);
+    return sweepAngle > 0
+        ? {startAngle: endPointAngle, endAngle: startPointAngle}
+        : {startAngle: startPointAngle, endAngle: endPointAngle};
 }
 
 // Scans the whole geometry once: true if ANY coordinate has a non-zero Z. OGC GML requires uniform

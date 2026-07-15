@@ -6,3 +6,4 @@ dist/
 *.tgz
 demo/src/license/luciad*.txt
 demo-oldria/src/license/luciad*.txt
+demo-gml/src/license/luciad*.txt

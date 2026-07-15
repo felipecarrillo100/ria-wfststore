@@ -5,6 +5,7 @@ import {
     createArc,
     createCircleBy3Points,
     createCircleByCenterPoint,
+    createCircularArcByCenterPoint,
     createPoint,
     createPolygon,
     createPolyline,
@@ -13,7 +14,7 @@ import {
 import {Polyline} from "@luciad/ria/shape/Polyline";
 import {Polygon} from "@luciad/ria/shape/Polygon";
 import {Circle} from "@luciad/ria/shape/Circle";
-import {Arc} from "@luciad/ria/shape/Arc";
+import {CircularArcByCenterPoint} from "@luciad/ria/shape/CircularArcByCenterPoint";
 import {ShapeType} from "@luciad/ria/shape/ShapeType";
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {MemoryStore} from "@luciad/ria/model/store/MemoryStore";
@@ -457,12 +458,15 @@ describe('AdvancedGMLCodec Circle/Arc support (Phase 4)', () => {
         expect(content).toContain("gml:ArcByCenterPoint");
         const decoded = codec.decode({content, contentType, reference: circularReference}).next();
 
-        const decodedArc = decoded.shape as Arc;
-        expect(ShapeType.contains(decodedArc.type, ShapeType.ARC)).toBe(true);
+        // Decoded as CircularArcByCenterPoint, not the generic elliptical Arc that was encoded:
+        // AdvancedGMLCodec.decode() normalizes RIA's own a===b Arc decode result into the
+        // structurally-circular shape, so a reloaded feature can never be edited into an ellipse.
+        // See normalizeDecodedArcShape.ts.
+        const decodedArc = decoded.shape as CircularArcByCenterPoint;
+        expect(ShapeType.contains(decodedArc.type, ShapeType.CIRCULAR_ARC)).toBe(true);
         expect(decodedArc.center.x).toBeCloseTo(0, 6);
         expect(decodedArc.center.y).toBeCloseTo(0, 6);
-        expect(decodedArc.a).toBeCloseTo(200, 6);
-        expect(decodedArc.b).toBeCloseTo(200, 6);
+        expect(decodedArc.radius).toBeCloseTo(200, 6);
         expect(decodedArc.startAzimuth).toBeCloseTo(37, 6);
         expect(decodedArc.sweepAngle).toBeCloseTo(-90, 6);
     });
@@ -475,28 +479,68 @@ describe('AdvancedGMLCodec Circle/Arc support (Phase 4)', () => {
         const {content, contentType} = codec.encode(circularCursorOf(feature));
         const decoded = codec.decode({content, contentType, reference: circularReference}).next();
 
-        const decodedArc = decoded.shape as Arc;
-        // Compare modulo 360: GMLGeometryParser.js's own norm360 calls mean an azimuth/sweep can
-        // legitimately come back as e.g. -160 for an original 200 (same angle, different
-        // representative in [-360,360)) - that's not a round-trip failure.
-        expect(normalizeDegrees(decodedArc.startAzimuth)).toBeCloseTo(normalizeDegrees(200), 6);
-        expect(normalizeDegrees(decodedArc.sweepAngle)).toBeCloseTo(normalizeDegrees(120), 6);
+        const decodedArc = decoded.shape as CircularArcByCenterPoint;
+        // GML's ArcByCenterPoint can only express a start->end walk in one fixed direction
+        // (counterclockwise, in math-angle terms) - it has no way to say "go the other way
+        // around". So for an originally-positive (clockwise) sweepAngle, the encoder must swap
+        // which endpoint it labels "start" for the walk to trace the correct side of the circle,
+        // and decode legitimately reconstructs a DIFFERENT (but geometrically equivalent)
+        // startAzimuth/sweepAngle pair - here, the far endpoint (200+120=320) with a negative
+        // (already-CCW-compatible) sweep, rather than the original values verbatim. Comparing raw
+        // decoded values against the originals (even modulo 360) would either fail outright or -
+        // worse - silently accept the wrong, complementary arc (same two endpoints, opposite side
+        // of the circle) as if it were correct. Comparing bounds is the only way to confirm this
+        // is genuinely the SAME curve, not its complement.
+        expect(decodedArc.bounds.x).toBeCloseTo(arc.bounds.x, 6);
+        expect(decodedArc.bounds.y).toBeCloseTo(arc.bounds.y, 6);
+        expect(decodedArc.bounds.width).toBeCloseTo(arc.bounds.width, 6);
+        expect(decodedArc.bounds.height).toBeCloseTo(arc.bounds.height, 6);
     });
 
-    it('Arc: a full-circle sweep (360) is encoded without an endAngle and decodes back as sweepAngle -360', () => {
+    it('CircularArcByCenterPoint: a positive sweep decodes to the same arc, not its complement', () => {
+        // Regression test for a real bug: encoding startAzimuth=30, sweepAngle=200 previously
+        // produced GML that decoded back to the COMPLEMENTARY arc (same center/radius/endpoints,
+        // but sweeping the other 160 degrees around the circle instead of the intended 200) - the
+        // exact symptom reported from a live browser session ("I draw one angle and get the
+        // complementary angle back"). Confirmed via bounds: the two arcs have visibly different
+        // bounding boxes despite sharing both endpoints, so a raw start/sweep or even a
+        // normalizeDegrees(mod 360) comparison would not have caught this.
+        const codec = new AdvancedGMLCodec();
+        const circularArc = createCircularArcByCenterPoint(circularReference, createPoint(circularReference, [0, 0]), 500, 30, 200);
+        const feature = new Feature(circularArc, {}, "f.circulararc-cw");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+        const decodedShape: any = decoded.shape;
+        const decodedArc: CircularArcByCenterPoint = decodedShape.shapeCount ? decodedShape.getShape(0) : decodedShape;
+
+        expect(decodedArc.bounds.x).toBeCloseTo(circularArc.bounds.x, 6);
+        expect(decodedArc.bounds.y).toBeCloseTo(circularArc.bounds.y, 6);
+        expect(decodedArc.bounds.width).toBeCloseTo(circularArc.bounds.width, 6);
+        expect(decodedArc.bounds.height).toBeCloseTo(circularArc.bounds.height, 6);
+    });
+
+    it('Arc: a full-circle sweep (360) is encoded as an explicit startAngle+360 endAngle (never omitted) and decodes back as sweepAngle -360', () => {
+        // Not omitted: confirmed against a live LuciadFusion WFS-T service that omitting
+        // endAngle for a full-sweep Insert is NOT interpreted as a full circle by every GML
+        // consumer - LuciadFusion's own parser silently produced a 270-degree arc instead. An
+        // explicit, unambiguous endAngle (startAngle+360, not reduced) round-trips correctly
+        // through both RIA's own decode (verified below) and LuciadFusion's Insert parser.
         const codec = new AdvancedGMLCodec();
         const arc = createArc(circularReference, createPoint(circularReference, [0, 0]), 10, 10, 0, 45, 360);
         const feature = new Feature(arc, {}, "f.arc-full");
 
         const {content, contentType} = codec.encode(circularCursorOf(feature));
-        expect(content).toContain("startAngle");
-        expect(content).not.toContain("endAngle");
+        expect(content).toContain("<gml:startAngle");
+        expect(content).toContain("<gml:endAngle");
+        expect(content).toContain(">405<"); // startAngle (45) + 360, unreduced
         const decoded = codec.decode({content, contentType, reference: circularReference}).next();
 
-        const decodedArc = decoded.shape as Arc;
+        const decodedArc = decoded.shape as CircularArcByCenterPoint;
         // Geometrically identical either way round (a full sweep traces the same circle
         // regardless of direction) - GMLGeometryParser.js's own convention for "no endAngle" is
-        // always -360, regardless of what the original signed sweep was.
+        // always -360, and norm360() reduces 405 to the same delta before subtracting, so the
+        // explicit form decodes identically.
         expect(decodedArc.sweepAngle).toBeCloseTo(-360, 6);
     });
 
@@ -509,7 +553,7 @@ describe('AdvancedGMLCodec Circle/Arc support (Phase 4)', () => {
         expect(content).toContain('srsDimension="3"');
         const decoded = codec.decode({content, contentType, reference: circularReference}).next();
 
-        expect((decoded.shape as Arc).center.z).toBe(33);
+        expect((decoded.shape as CircularArcByCenterPoint).center.z).toBe(33);
     });
 
     it('a genuinely elliptical Arc (a !== b) throws - no standard GML 3.2 representation exists for it', () => {

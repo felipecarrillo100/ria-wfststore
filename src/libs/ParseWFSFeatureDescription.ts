@@ -10,7 +10,12 @@ export type GeoJSONGeometryType =
     "MultiPoint" |
     "MultiLineString" |
     "MultiPolygon" |
-    "GeometryCollection";
+    "GeometryCollection" |
+    // Not actual GeoJSON types - GMLFeatureEncoder.getGeometryTypeName() returns these for
+    // Circle/Arc shapes (which GeoJSON can't represent at all), so areCompatibleGeometries can
+    // validate them the same way as everything else.
+    "Circle" |
+    "Arc";
 
 export type BasicJSONSchema7TypeName = "string" | "number" | "boolean";
 export const xsdToJsonMap: { [key: string]: BasicJSONSchema7TypeName } = {
@@ -271,6 +276,10 @@ export function areCompatibleGeometries(geoJSONType: GeoJSONGeometryType, gmlTyp
         "MultiLineString": ["MultiLineString", "MultiCurve", "Geometry", "MultiGeometry"],
         "MultiPolygon": ["MultiPolygon", "MultiSurface", "Geometry", "MultiGeometry"],
         "GeometryCollection": ["MultiGeometry", "Geometry"],
+        // No dedicated GML schema type exists for either (see GMLCodecCircularShapeSupport.test.ts) -
+        // only compatible with a field the server advertises as fully generic.
+        "Circle": ["Geometry"],
+        "Arc": ["Geometry"],
     };
 
     // Get the GML geometry name from the key

@@ -1,6 +1,6 @@
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {Cursor} from "@luciad/ria/model/Cursor";
-import {EncodeResult} from "@luciad/ria/model/codec/Codec";
+import {CodecDecodeOptions, EncodeResult} from "@luciad/ria/model/codec/Codec";
 import {GMLCodec, GMLCodecConstructorOptions} from "@luciad/ria/model/codec/GMLCodec";
 import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {Shape} from "@luciad/ria/shape/Shape";
@@ -12,6 +12,7 @@ import {encodeGeometryToGML} from "./encodeGeometryToGML";
 import {GMLGeometry} from "./GMLGeometry";
 import {normalizeGMLGeometry, normalizeSrsName} from "./normalizeGMLGeometry";
 import {tryBuildCircularGeometryJSON} from "./encodeCircularShapeToJSON";
+import {normalizeDecodedArcShape} from "./normalizeDecodedArcShape";
 import {GMLFeatureEncoder} from "../../GMLFeatureEncoder";
 
 export interface AdvancedGMLCodecConstructorOptions extends GMLCodecConstructorOptions {
@@ -66,7 +67,24 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         this.mode3D = options?.mode3D;
     }
 
-    // decode() is intentionally not overridden: it is inherited from GMLCodec as-is.
+    // Decoding itself is still entirely delegated to GMLCodec.decode - only the resulting shapes
+    // are post-processed here, to swap RIA's own decoded elliptical Arc (a === b) for the
+    // structurally-circular CircularArcByCenterPoint. See normalizeDecodedArcShape.ts for why this
+    // matters: without it, a shape drawn/saved as CircularArcByCenterPoint comes back from the
+    // server as a plain Arc, editable into an ellipse by RIA's default editor.
+    decode(options: CodecDecodeOptions): Cursor<TFeature> {
+        const cursor = super.decode(options);
+        return {
+            hasNext: () => cursor.hasNext(),
+            next: () => {
+                const feature = cursor.next();
+                if (feature.shape) {
+                    feature.shape = normalizeDecodedArcShape(feature.shape) as TFeature["shape"];
+                }
+                return feature;
+            }
+        };
+    }
 
     encode(featureCursor: Cursor<TFeature>): EncodeResult {
         const xmlns = this.gmlVersion === '3.1.1' ? 'http://www.opengis.net/gml' : 'http://www.opengis.net/gml/3.2';
