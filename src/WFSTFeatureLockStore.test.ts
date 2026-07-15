@@ -3,7 +3,9 @@ import {WFSTFeatureStore} from "./WFSTFeatureStore";
 import {WFSTFeatureLockStore} from "./WFSTFeatureLockStore";
 import {WFSTFeatureLocksStorage} from "./libs/storage/WFSTFeatureLocksStorage";
 import {WFSTDelegateScreenHelper} from "./libs/screen/WFSTDelegateScreenHelper";
-import {createPoint} from "@luciad/ria/shape/ShapeFactory";
+import {AdvancedGMLCodec} from "./libs/gml/gml32/AdvancedGMLCodec";
+import {createCircularArcByCenterPoint, createPoint} from "@luciad/ria/shape/ShapeFactory";
+import {ShapeType} from "@luciad/ria/shape/ShapeType";
 import {Feature} from "@luciad/ria/model/feature/Feature";
 
 // Mirrors the exact pipeline MainMapPanel.tsx -> EditWFSTFeaturesWithLockForm.tsx ->
@@ -148,6 +150,83 @@ describe('WFSTFeatureLockStore (demo call-shape parity)', () => {
 
         const trackedEntry = (lockStore as any).options.insertedIds.find((e: any) => e.id === id);
         expect(JSON.parse(trackedEntry.feature).properties.label).toBe("edited");
+
+        await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
+    });
+});
+
+// The lock-editing helper builds its own internal delegate WFSTFeatureStore
+// (initializeDelegateStore) rather than reusing whatever store/codec the main WFS-T layer was
+// actually configured with - storeSettings deliberately strips the codec instance (it isn't
+// serializable), so the lock store re-derives one from the outputFormat string alone. Before this
+// fix it always picked RIA's own plain GMLCodec for non-JSON output, which has none of the
+// Circle/Arc fixes (ellipse-drift normalization, ShapeList(1) unwrap, or encode support at all) -
+// so a feature edited through the lock helper showed a different, unsafe shape than the same
+// feature edited through the main layer. These tests target the GML branch specifically; the
+// existing tests above (unmodified) already prove the JSON branch is untouched.
+describe('WFSTFeatureLockStore GML branch (Circle/Arc parity with the main WFS-T layer)', () => {
+    async function acquireLockGML(label: string) {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features", {
+            codec: new AdvancedGMLCodec(),
+            outputFormat: "application/gml+xml; version=3.2",
+        });
+        const reference = store.getReference();
+        // The feature being locked is a plain Point, not a circular shape: GeoServer's WFS-T
+        // Transaction parser rejects gml:ArcByCenterPoint/CircleByCenterPoint outright (confirmed
+        // elsewhere in this codebase), so a real circular Insert can't be acquired against it at
+        // all. The fix under test only concerns the LOCAL edit/pending-cache round trip (put() and
+        // loadLatestState()), which never touches the network - editing the locked feature to a
+        // CircularArcByCenterPoint entirely client-side is enough to exercise it.
+        const feature = new Feature(createPoint(reference, [6, 6]), {label});
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const lockItem = await store.getFeatureWithLock({rids: [id as string], expiry: 5});
+        (lockItem as any).storeSettings = {...(lockItem.storeSettings as any), bounds: undefined};
+        lockItem.lockName = `${label} lock`.trim();
+
+        await WFSTFeatureLocksStorage.addLock(lockItem);
+        const retrieved = await WFSTFeatureLocksStorage.getLock(lockItem.id);
+        return {storageId: lockItem.id, retrieved};
+    }
+
+    it('put(): editing to a CircularArcByCenterPoint does not crash, and the pending edit is GML- not GeoJSON-serialized', async () => {
+        const {storageId, retrieved} = await acquireLockGML("gml-lock-put");
+        const lockStore = new WFSTFeatureLockStore(retrieved);
+        await waitFor(() => (lockStore as any).query().hasNext());
+        const existingId = (lockStore as any).query().next().id;
+
+        const arcShape = createCircularArcByCenterPoint(lockStore.getReference(), createPoint(lockStore.getReference(), [6, 6]), 500, 30, 200);
+        const putResult = lockStore.put(new Feature(arcShape, {label: "edited-to-arc"}, existingId));
+
+        expect(putResult).toBe(existingId);
+        const tracked = (lockStore as any).options.updatedIds.find((e: any) => e.id === existingId);
+        expect(tracked).toBeTruthy();
+        // GML, not GeoJSON: JSON.parse would throw on GML/XML text.
+        expect(() => JSON.parse(tracked.feature)).toThrow();
+        expect(tracked.feature).toContain("gml:ArcByCenterPoint");
+
+        await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
+    });
+
+    it('loadLatestState(): a pending CircularArcByCenterPoint edit reloads as the same safe shape, not the elliptical Arc', async () => {
+        const {storageId, retrieved} = await acquireLockGML("gml-lock-reload");
+        const lockStore = new WFSTFeatureLockStore(retrieved);
+        await waitFor(() => (lockStore as any).query().hasNext());
+        const existingId = (lockStore as any).query().next().id;
+
+        const arcShape = createCircularArcByCenterPoint(lockStore.getReference(), createPoint(lockStore.getReference(), [6, 6]), 500, 30, 200);
+        lockStore.put(new Feature(arcShape, {label: "edited-to-arc"}, existingId));
+
+        // Simulate reloading the page: a fresh WFSTFeatureLockStore built from the same persisted
+        // lock item, exercising loadLatestState()'s decodePendingFeature path from scratch.
+        const latest = await WFSTFeatureLocksStorage.getLock(storageId);
+        const reloadedLockStore = new WFSTFeatureLockStore(latest);
+        await waitFor(() => (reloadedLockStore as any).query().hasNext());
+
+        const reloadedShape: any = (reloadedLockStore as any).query().next().shape;
+        expect(ShapeType.contains(reloadedShape.type, ShapeType.CIRCULAR_ARC)).toBe(true);
+        expect(ShapeType.contains(reloadedShape.type, ShapeType.ARC)).toBe(false);
 
         await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
     });

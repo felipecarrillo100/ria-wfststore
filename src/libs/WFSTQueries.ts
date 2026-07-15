@@ -3,7 +3,7 @@ import {GMLFeatureEncoder} from "./GMLFeatureEncoder";
 import {GMLGeometryTypeKey, WFSFeatureDescription} from "./ParseWFSFeatureDescription";
 import {create} from "xmlbuilder2";
 import {WFSTEditFeatureLockItem} from "../types/WFSTTypes";
-import {decodeStoredJSONFeature, verifyGeometryCompatibilityOrThrowError} from "./WFSTFeaturePreparation";
+import {decodeStoredFeature, verifyGeometryCompatibilityOrThrowError} from "./WFSTFeaturePreparation";
 
 interface WFSTAddUpdateRequestOptions {
     typeName: string;
@@ -206,7 +206,7 @@ ${this.singleUpdate2_0_0(options)}
         // Avoid sending geometry when only properties changed (onlyProperties boolean)
         const updatedItems = options.lockItem.updatedIds.map(element=> this.singleUpdate2_0_0({
             typeName: options.typeName,
-            feature: decodeStoredJSONFeature(element.feature, options.lockItem.srsName),
+            feature: decodeStoredFeature(element.feature, options.lockItem.srsName),
             featureDescription: options.featureDescription,
             onlyProperties: element.onlyProperties,
             prettyPrint: options.prettyPrint,
@@ -215,7 +215,7 @@ ${this.singleUpdate2_0_0(options)}
         }));
         const insertedItems = options.lockItem.insertedIds.map(element=> this.singleAdd2_0_0({
             typeName: options.typeName,
-            feature: decodeStoredJSONFeature(element.feature, options.lockItem.srsName),
+            feature: decodeStoredFeature(element.feature, options.lockItem.srsName),
             featureDescription: options.featureDescription,
             prettyPrint: options.prettyPrint,
             invertAxes: options.invertAxes,
