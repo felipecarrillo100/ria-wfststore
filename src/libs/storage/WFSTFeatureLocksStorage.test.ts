@@ -1,4 +1,4 @@
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {WFSTFeatureLocksStorage} from "./WFSTFeatureLocksStorage";
 import {WFSTEditFeatureLockItem} from "../../WFSTFeatureStore";
 
@@ -103,5 +103,58 @@ describe('WFSTFeatureLocksStorage (demo call-shape parity)', () => {
         await expect(WFSTFeatureLocksStorage.getLock(expired.id)).rejects.toBeUndefined();
         const stillActive = await WFSTFeatureLocksStorage.getLock(active.id);
         expect(stillActive.lockId).toBe("ACTIVE");
+    });
+});
+
+// Phase 3 slice 4: the module-load setTimeout loop is now an explicit start/stop API
+// (auto-started at import time, same as the old free-standing loop() function, but now
+// stoppable/restartable so tests can drive its cadence deterministically instead of leaving a
+// real background interval running for the lifetime of the test process).
+describe('WFSTFeatureLocksStorage.startExpiredLocksLoop/stopExpiredLocksLoop', () => {
+
+    beforeEach(() => {
+        localStorage.clear();
+        // Cancel the real interval auto-started at module load before taking over with fake
+        // timers, so it can't fire in the background mid-test.
+        WFSTFeatureLocksStorage.stopExpiredLocksLoop();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        WFSTFeatureLocksStorage.stopExpiredLocksLoop();
+    });
+
+    it('runs deleteExpiredLocks on each tick and keeps rescheduling itself', async () => {
+        const spy = vi.spyOn(WFSTFeatureLocksStorage, 'deleteExpiredLocks');
+
+        WFSTFeatureLocksStorage.startExpiredLocksLoop(1000);
+        expect(spy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(spy).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(spy).toHaveBeenCalledTimes(2);
+    });
+
+    it('starting an already-running loop is a no-op (does not reset/duplicate the schedule)', async () => {
+        const spy = vi.spyOn(WFSTFeatureLocksStorage, 'deleteExpiredLocks');
+
+        WFSTFeatureLocksStorage.startExpiredLocksLoop(1000);
+        WFSTFeatureLocksStorage.startExpiredLocksLoop(1000); // second call should not schedule a duplicate tick
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('stopExpiredLocksLoop cancels the pending tick so it never fires', async () => {
+        const spy = vi.spyOn(WFSTFeatureLocksStorage, 'deleteExpiredLocks');
+
+        WFSTFeatureLocksStorage.startExpiredLocksLoop(1000);
+        WFSTFeatureLocksStorage.stopExpiredLocksLoop();
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(spy).not.toHaveBeenCalled();
     });
 });

@@ -36,6 +36,26 @@ interface QueryResult {
 export class WFSTFeatureLocksStorage {
     private static observers: Set<Observer> = new Set();
     private static disableNotifications: boolean = false;
+    private static expiredLocksTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Started automatically at the bottom of this file so existing consumers see no behavior
+    // change. Exposed as start/stop so tests can control the cadence explicitly instead of a
+    // real background interval running for the lifetime of the test process.
+    public static startExpiredLocksLoop(intervalMs: number = 60 * 1000): void {
+        if (this.expiredLocksTimer !== null) return; // already running
+        this.expiredLocksTimer = setTimeout(() => {
+            this.expiredLocksTimer = null;
+            WFSTFeatureLocksStorage.deleteExpiredLocks();
+            this.startExpiredLocksLoop(intervalMs);
+        }, intervalMs);
+    }
+
+    public static stopExpiredLocksLoop(): void {
+        if (this.expiredLocksTimer !== null) {
+            clearTimeout(this.expiredLocksTimer);
+            this.expiredLocksTimer = null;
+        }
+    }
 
     // Method to subscribe to notifications
     public static subscribe(observer: Observer): () => void {
@@ -270,11 +290,4 @@ export class WFSTFeatureLocksStorage {
 
 
 
-function loop(): void {
-    setTimeout(() => {
-        WFSTFeatureLocksStorage.deleteExpiredLocks();
-        loop(); // Recursively call loop to continue the cycle
-    }, 60 * 1000); // 5 minutes in milliseconds
-}
-
-loop();
+WFSTFeatureLocksStorage.startExpiredLocksLoop();
