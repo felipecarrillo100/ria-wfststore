@@ -4,10 +4,12 @@ import {WFSTFeatureStore} from "./WFSTFeatureStore";
 import {WFSTDelegateScreenHelper} from "./libs/screen/WFSTDelegateScreenHelper";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";
 import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
+import {AdvancedGMLCodec} from "./libs/gml/gml32/AdvancedGMLCodec";
 import {bbox} from "@luciad/ria/ogc/filter/FilterFactory";
-import {createBounds, createPoint, createPolygon} from "@luciad/ria/shape/ShapeFactory";
+import {createBounds, createCircularArcByCenterPoint, createPoint, createPolygon, createShapeList} from "@luciad/ria/shape/ShapeFactory";
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {Polygon} from "@luciad/ria/shape/Polygon";
+import {Cursor} from "@luciad/ria/model/Cursor";
 
 // Real timers are required for this test
 // jest.useFakeTimers();
@@ -333,6 +335,173 @@ describe('WFSTFeatureStore transport error handling', () => {
         fetchSpy.mockRestore();
         consoleLog.mockRestore();
     });
+});
+
+// Some servers (confirmed against a live LuciadFusion instance, documented in KNOWN_ISSUES.md)
+// accept a Circle/Arc Insert/Update but silently degrade the geometry into something unreadable
+// on the very next GetFeature. add()/put() re-query and bounds-check any Circle/Arc write before
+// reporting success, so that failure is loud and immediate instead of surfacing later, on reload,
+// disconnected from the save that caused it. Mocked here (no live server involved): the "verify"
+// fetch response is built via AdvancedGMLCodec.encode() itself, the same proven encode/decode
+// round trip AdvancedGMLCodec.test.ts already exercises directly.
+describe('WFSTFeatureStore circular geometry round-trip verification', () => {
+    function cursorOf(feature: Feature): Cursor<Feature> {
+        let i = 0;
+        const items = [feature];
+        return {hasNext: () => i < items.length, next: () => items[i++]};
+    }
+
+    async function warmedUpGMLStore(options?: {verifyCircularGeometryRoundTrip?: boolean}) {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features", {
+            codec: new AdvancedGMLCodec(),
+            outputFormat: "application/gml+xml; version=3.2",
+            ...options
+        });
+        // Same warm-up as the transport-error-handling describe block above: populates
+        // featureTemplate via a real request, so every mocked fetch below is the only one add()/
+        // put() actually issues.
+        await store.loadFeatureDescription();
+        return store;
+    }
+
+    function insertResponseXml(rid: string) {
+        return `<wfs:TransactionResponse xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0">
+            <wfs:TransactionSummary><wfs:totalInserted>1</wfs:totalInserted><wfs:totalUpdated>0</wfs:totalUpdated><wfs:totalDeleted>0</wfs:totalDeleted></wfs:TransactionSummary>
+            <wfs:InsertResults><wfs:Feature><fes:ResourceId rid="${rid}"/></wfs:Feature></wfs:InsertResults>
+        </wfs:TransactionResponse>`;
+    }
+
+    function updateResponseXml(rid: string) {
+        return `<wfs:TransactionResponse xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0">
+            <wfs:TransactionSummary><wfs:totalInserted>0</wfs:totalInserted><wfs:totalUpdated>1</wfs:totalUpdated><wfs:totalDeleted>0</wfs:totalDeleted></wfs:TransactionSummary>
+        </wfs:TransactionResponse>`;
+    }
+
+    it('add(): a circular shape whose round trip matches resolves normally (one extra "verify" fetch)', async () => {
+        const store = await warmedUpGMLStore();
+        const codec = new AdvancedGMLCodec();
+        const reference = store.getReference();
+        const shape = createCircularArcByCenterPoint(reference, createPoint(reference, [0, 0]), 500, 30, 200);
+        const verifyResponseXml = codec.encode(cursorOf(new Feature(shape, {}, "test_features.500"))).content;
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(insertResponseXml("test_features.500"))} as Response)
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(verifyResponseXml)} as Response);
+
+        const feature = new Feature(shape, {label: "arc"});
+        const result = await store.add(feature);
+
+        expect(result).toBe("test_features.500");
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        fetchSpy.mockRestore();
+    });
+
+    it('add(): a circular shape whose round trip does not match resolves null and reports MessageError', async () => {
+        const store = await warmedUpGMLStore();
+        const messageError = vi.fn();
+        class SpyScreenHelper extends WFSTDelegateScreenHelper {
+            MessageError(s: string) { messageError(s); }
+        }
+        store.setScreenHelper(new SpyScreenHelper());
+
+        const codec = new AdvancedGMLCodec();
+        const reference = store.getReference();
+        const drawnShape = createCircularArcByCenterPoint(reference, createPoint(reference, [0, 0]), 500, 30, 200);
+        // A server-degraded response: an empty geometry collection, matching what LuciadFusion
+        // actually returns for a closed curve RIA can't decode - see KNOWN_ISSUES.md.
+        const brokenFeature = new Feature(createShapeList(reference, []), {}, "test_features.501");
+        const verifyResponseXml = codec.encode(cursorOf(brokenFeature)).content;
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(insertResponseXml("test_features.501"))} as Response)
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(verifyResponseXml)} as Response);
+
+        const feature = new Feature(drawnShape, {label: "arc"});
+        const result = await store.add(feature);
+
+        expect(result).toBeNull();
+        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('Geometry round-trip verification failed'));
+        fetchSpy.mockRestore();
+    });
+
+    it('add(): a non-circular shape (Polygon) skips verification entirely - no extra fetch', async () => {
+        const store = await warmedUpGMLStore();
+        const reference = store.getReference();
+        const shape = createPolygon(reference, [[0, 0], [1, 0], [1, 1]]);
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(insertResponseXml("test_features.502"))} as Response);
+
+        const feature = new Feature(shape, {label: "polygon"});
+        const result = await store.add(feature);
+
+        expect(result).toBe("test_features.502");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        fetchSpy.mockRestore();
+    });
+
+    it('add(): verifyCircularGeometryRoundTrip: false skips verification even for a circular shape', async () => {
+        const store = await warmedUpGMLStore({verifyCircularGeometryRoundTrip: false});
+        const reference = store.getReference();
+        const shape = createCircularArcByCenterPoint(reference, createPoint(reference, [0, 0]), 500, 30, 200);
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(insertResponseXml("test_features.503"))} as Response);
+
+        const feature = new Feature(shape, {label: "arc"});
+        const result = await store.add(feature);
+
+        expect(result).toBe("test_features.503");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        fetchSpy.mockRestore();
+    });
+
+    it('put(): a circular shape whose round trip does not match resolves null and reports MessageError', async () => {
+        const store = await warmedUpGMLStore();
+        const messageError = vi.fn();
+        class SpyScreenHelper extends WFSTDelegateScreenHelper {
+            MessageError(s: string) { messageError(s); }
+        }
+        store.setScreenHelper(new SpyScreenHelper());
+
+        const codec = new AdvancedGMLCodec();
+        const reference = store.getReference();
+        const editedShape = createCircularArcByCenterPoint(reference, createPoint(reference, [0, 0]), 500, 30, 200);
+        const brokenFeature = new Feature(createShapeList(reference, []), {}, "test_features.504");
+        const verifyResponseXml = codec.encode(cursorOf(brokenFeature)).content;
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(updateResponseXml("test_features.504"))} as Response)
+            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(verifyResponseXml)} as Response);
+
+        const feature = new Feature(editedShape, {label: "arc"}, "test_features.504");
+        const result = await store.put(feature);
+
+        expect(result).toBeNull();
+        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('Geometry round-trip verification failed'));
+        fetchSpy.mockRestore();
+    });
+
+    // Live GeoServer regression guard, no mocking: GeoTools' WFS-T Transaction parser rejects
+    // gml:ArcByCenterPoint/CircleByCenterPoint outright (confirmed this session via raw curl) -
+    // the new verification code must never even run here, since the existing (correct) rejection
+    // already resolves null before any "verify" query would happen. Guards against the new logic
+    // accidentally changing this already-correct, pre-existing behavior.
+    it('add(): a CircularArcByCenterPoint insert against real GeoServer is still rejected at the Transaction level (verification never runs)', async () => {
+        const store = await warmedUpGMLStore();
+        const reference = store.getReference();
+        const shape = createCircularArcByCenterPoint(reference, createPoint(reference, [-90, 35]), 500, 30, 200);
+        const feature = new Feature(shape, {label: "geoserver-arc-rejection-guard"});
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch');
+        const result = await store.add(feature);
+
+        expect(result).toBeNull();
+        // Exactly one fetch (the rejected Insert) - proves the verification step's own extra
+        // "verify" query never fires, since there's no successful insert to verify.
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        fetchSpy.mockRestore();
+    }, 15000);
 });
 
 // Verifies requestHeaders - the standard LuciadRIA mechanism for attaching custom HTTP headers to

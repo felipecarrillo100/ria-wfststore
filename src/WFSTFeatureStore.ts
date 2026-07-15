@@ -18,6 +18,7 @@ import {WFSVersion} from "@luciad/ria/ogc/WFSVersion";
 import {CoordinateReference} from "@luciad/ria/reference/CoordinateReference";
 import {Cursor} from "@luciad/ria/model/Cursor";
 import {GMLFeatureEncoder} from "./libs/GMLFeatureEncoder";
+import {assertGeometryRoundTrip, shouldVerifyRoundTrip} from "./libs/verifyGeometryRoundTrip";
 import {WFSCapabilitiesExtended, WFSCapabilitiesExtendedResult, WFSTOperationsKeys} from "./WFSCapabilitiesExtended";
 import {WFSTDelegateScreenHelper} from "./libs/screen/WFSTDelegateScreenHelper";
 import {ProgrammingError} from "@luciad/ria/error/ProgrammingError";
@@ -85,12 +86,12 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         return !!(this._wfst && this._wfst.Transaction);
     }
 
-    public static async createFromURL_WFST(url, typeName: string, options?: WFSFeatureStoreCreateOptions & WFSCapabilitiesFromUrlOptions) {
+    public static async createFromURL_WFST(url, typeName: string, options?: WFSFeatureStoreCreateOptions & WFSCapabilitiesFromUrlOptions & Pick<WFSTFeatureStoreConstructorOptions, 'verifyCircularGeometryRoundTrip'>) {
         const s = await WFSCapabilitiesExtended.fromURL(url, options);
         return WFSTFeatureStore.createFromCapabilities_WFST(s, typeName, options);
     }
 
-    public static createFromCapabilities_WFST(extended: WFSCapabilitiesExtendedResult, typeName:string, options: WFSFeatureStoreCreateOptions = {}) {
+    public static createFromCapabilities_WFST(extended: WFSCapabilitiesExtendedResult, typeName:string, options: WFSFeatureStoreCreateOptions & Pick<WFSTFeatureStoreConstructorOptions, 'verifyCircularGeometryRoundTrip'> = {}) {
         const wfsCapabilities = extended.wfsCapabilities;
         const wfst = extended.wfstCapabilities.WFSTOperations;
         // featureTypes is null (not []) when the capabilities document omits <FeatureTypeList>
@@ -132,7 +133,8 @@ export class WFSTFeatureStore extends WFSFeatureStore {
             swapAxes: options.swapAxes,
             geometryName: options.geometryName,
             requestParameters: options.requestParameters,
-            bounds: getModelBoundsFromCapabilities(match, reference)
+            bounds: getModelBoundsFromCapabilities(match, reference),
+            verifyCircularGeometryRoundTrip: options.verifyCircularGeometryRoundTrip
         };
         return new WFSTFeatureStore({...constructorOptions, wfst})
     }
@@ -196,12 +198,29 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                          if (Number(totalUpdated)===0) {
                              this.delegateScreen.MessageWarning(`[WFS-T] Total updated: ${totalUpdated}`);
                              resolve(null);
-                         } else {
-                             // Workaround removed
-                             if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
+                             return;
+                         }
+                         // Workaround removed
+                         if (frozenFeature.id !== resourceId) console.warn(`Invalid ID response to put. Expected: ${frozenFeature.id} but got ${resourceId}`);
+                         const finalizePutSuccess = () => {
                              eventSupport.emit("StoreChanged", "update", frozenFeature, frozenFeature.id);
                              resolve(feature.id);
                              this.delegateScreen.MessageSuccess(`[WFS-T] Total updated: ${totalUpdated}`);
+                         };
+                         // See add()'s matching comment - same silent-degradation risk applies to
+                         // an edited Circle/Arc being re-saved.
+                         if (this.options.verifyCircularGeometryRoundTrip !== false && shouldVerifyRoundTrip(frozenFeature.shape)) {
+                             this.queryByRids([frozenFeature.id as string]).then(cursor => {
+                                 try {
+                                     assertGeometryRoundTrip(frozenFeature.shape, cursor && cursor.hasNext() ? cursor.next().shape : null);
+                                     finalizePutSuccess();
+                                 } catch (error) {
+                                     resolve(null);
+                                     this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
+                                 }
+                             });
+                         } else {
+                             finalizePutSuccess();
                          }
                      });
                  }
@@ -251,11 +270,31 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                     if (Number(totalInserted)===0) {
                         this.delegateScreen.MessageWarning(`[WFS-T] Total inserted: ${totalInserted}`);
                         resolve(null);
-                    } else {
-                        newFeature.id = resourceId;
+                        return;
+                    }
+                    newFeature.id = resourceId;
+                    const finalizeAddSuccess = () => {
                         eventSupport.emit("StoreChanged",  "add", newFeature, resourceId);
                         resolve(resourceId)
                         this.delegateScreen.MessageSuccess(`[WFS-T] Total inserted: ${totalInserted}`);
+                    };
+                    // Some servers (confirmed against a live LuciadFusion instance) accept a
+                    // Circle/Arc Insert but silently degrade it into something unreadable on the
+                    // very next GetFeature - re-query and bounds-check before reporting success,
+                    // so that failure is loud and immediate rather than surfacing later, on
+                    // reload, disconnected from this save.
+                    if (this.options.verifyCircularGeometryRoundTrip !== false && shouldVerifyRoundTrip(feature.shape)) {
+                        this.queryByRids([resourceId as string]).then(cursor => {
+                            try {
+                                assertGeometryRoundTrip(feature.shape, cursor && cursor.hasNext() ? cursor.next().shape : null);
+                                finalizeAddSuccess();
+                            } catch (error) {
+                                resolve(null);
+                                this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
+                            }
+                        });
+                    } else {
+                        finalizeAddSuccess();
                     }
                 }, {
                     // 400 also needs the extra EditNewFeatureProperties call that the other

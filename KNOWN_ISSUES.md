@@ -2,6 +2,26 @@
 
 Internal notes on defects that are understood and reproducible, but deliberately not fixed yet — kept here rather than in the README so they don't read as a warning to someone evaluating whether to use the library.
 
+## Circle/Arc round-trip verification: what it catches, and its accepted limits
+
+**Status**: implemented, not a defect — documenting scope and trade-offs of a safety net, not a bug.
+
+### What prompted this
+
+Some WFS-T servers accept a Circle/Arc `Insert`/`Update` but silently degrade the geometry into something unreadable on the very next `GetFeature`. Confirmed against a live LuciadFusion instance: a geometrically *closed* curve (a true `Circle`, or a `CircularArcByCenterPoint` whose sweep happens to close) is accepted on write, but re-encoded as a `Polygon` boundary on read — which RIA's `GMLCodec.decode()` cannot turn back into a circle at all (an empty shape). Without a safety net, `add()`/`put()` report success, and the failure only surfaces later, on reload, with no link back to the save that caused it.
+
+### What the check does
+
+`add()`/`put()` now re-query any Circle/Arc feature immediately after a successful write and bounds-compare the decoded result against what was sent (`src/libs/verifyGeometryRoundTrip.ts`). On mismatch, the write is reported as a failure (`delegateScreen.MessageError`, resolves `null`) instead of silently succeeding — the same `Promise<FeatureId>`/`null`-on-failure contract every other failure path already uses.
+
+- **Scoped to Circle/Arc only.** Every other geometry type pays nothing beyond a cheap gate check.
+- **Bounds-based, with a 5% relative tolerance**, not an exact property comparison — a correct round trip can legitimately restate a shape's `startAzimuth`/`sweepAngle` differently (see the complementary-arc fix elsewhere in this codebase) without being wrong, so exact-value comparison would produce false positives. The tolerance absorbs real floating-point/reprojection drift while still catching "came back null/empty/wildly different."
+- **Opt-out**: `verifyCircularGeometryRoundTrip: false` on the store's constructor options skips the check entirely, for a write-only pipeline or one that doesn't read circular geometry back through RIA.
+
+### Accepted limitation: no automatic rollback
+
+On a verification failure, the row is **left in place server-side** — `add()` does not attempt to delete what it just inserted. The primary value (a loud, immediate failure signal instead of a silent, later one) comes entirely from reporting the failure and resolving `null`; the orphaned row itself is invisible to any RIA-based UI regardless (it's the geometry RIA can't decode in the first place), so cleaning it up would add real complexity (a second write, handling for *that* write potentially failing too) for comparatively little additional value. This mirrors GeoServer's own behavior for the same class of geometry, which rejects the `Insert` outright and likewise leaves nothing to clean up.
+
 ## GML axis-swap baseline is wrong specifically for a literal `CRS:84` reference
 
 **Status**: confirmed, reproducible, fix designed, not yet applied. Deferred because it does not affect the library's primary use case (see "Real-world impact" below).
