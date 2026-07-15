@@ -465,6 +465,56 @@ describe('WFSTFeatureStore 3D support (live GeoServer round-trip)', () => {
     });
 });
 
+// Pure constructor logic, no network involved: minimalConstructorOptions below only needs to be
+// enough for `new WFSTFeatureStore(...)` to not throw, since nothing here calls a method that
+// performs a real request.
+function minimalConstructorOptions(overrides: {swapAxes?: boolean | string[], referenceIdentifier?: string} = {}) {
+    const reference = getReference(overrides.referenceIdentifier ?? "CRS:84");
+    return {
+        wfst: {Transaction: true} as any,
+        outputFormat: "application/json",
+        codec: new GeoJsonCodec({generateIDs: false}),
+        swapAxes: overrides.swapAxes,
+        serviceURL: "http://localhost:8092/geoserver/wfst_test/wfs",
+        postServiceURL: "http://localhost:8092/geoserver/wfst_test/wfs",
+        reference,
+        typeName: "wfst_test:test_features",
+        versions: ["2.0.0" as any],
+        methods: ["POST", "GET"]
+    } as any;
+}
+
+describe('WFSTFeatureStore swapAxes (invertAxes) handling', () => {
+    it('swapAxes: true forces axis inversion (Catalog-Explorer-style blanket boolean toggle)', () => {
+        const store = new WFSTFeatureStore(minimalConstructorOptions({swapAxes: true}));
+        expect((store as any).invertAxes).toBe(true);
+    });
+
+    it('swapAxes: false / omitted means no forced inversion', () => {
+        const storeFalse = new WFSTFeatureStore(minimalConstructorOptions({swapAxes: false}));
+        expect((storeFalse as any).invertAxes).toBe(false);
+
+        const storeOmitted = new WFSTFeatureStore(minimalConstructorOptions());
+        expect((storeOmitted as any).invertAxes).toBe(false);
+    });
+
+    it('swapAxes: [<this store\'s own reference identifier>] forces inversion - the array form actually works', () => {
+        const store = new WFSTFeatureStore(minimalConstructorOptions({
+            referenceIdentifier: "CRS:84",
+            swapAxes: ["CRS:84"]
+        }));
+        expect((store as any).invertAxes).toBe(true);
+    });
+
+    it('swapAxes: [<an unrelated identifier>] does NOT force inversion - the actual bug fix', () => {
+        const store = new WFSTFeatureStore(minimalConstructorOptions({
+            referenceIdentifier: "CRS:84",
+            swapAxes: ["EPSG:3857"]
+        }));
+        expect((store as any).invertAxes).toBe(false);
+    });
+});
+
 async function CreateGeoserverStore(requestedFeatureType?:string, overrides?: {mode3D?: boolean}) {
     const {wfsCapabilities, wfstCapabilities} = await WFSCapabilitiesExtended.fromURL(OWS_URL);
     const featureOperation = WFSCapabilitiesExtended.getServiceOperation(wfsCapabilities, "GetFeature");

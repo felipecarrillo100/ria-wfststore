@@ -68,7 +68,14 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         this.setFeatureTemplate(null);
         this.version = options.versions && options.versions.length>0 ? options.versions[0] : WFSVersion.V200;
         this.delegateScreen = new WFSTDelegateScreenHelper();
-        this.invertAxes = !!options.swapAxes;
+        // options.swapAxes is typed as string[] (RIA's own WFSFeatureStoreConstructorOptions),
+        // but some real callers pass a plain boolean through a loosely-typed options object -
+        // a blanket "swap for this whole store" toggle. Support both: a boolean means exactly
+        // that; a real array is checked for membership against this store's own reference, so
+        // e.g. swapAxes: ["EPSG:3857"] on a CRS:84 store correctly does nothing.
+        this.invertAxes = Array.isArray(options.swapAxes)
+            ? options.swapAxes.includes(options.reference.identifier)
+            : !!options.swapAxes;
         // Unlike invertAxes above, this must NOT be coerced with !! - omitted (undefined) means
         // "auto-detect per feature", which is what every existing caller gets since none pass this.
         this.mode3D = options.mode3D;
