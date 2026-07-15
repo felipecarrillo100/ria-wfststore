@@ -5,6 +5,7 @@ import {encodeFeatureToGML, GMLFeature} from "./gml/gml32/encodeFeatureToGML";
 import {GMLGeometryNames, GMLGeometryTypeKey, GMLGeometryTypeToGeometry} from "./ParseWFSFeatureDescription";
 import {GMLGeometry, GMLGeometryTypeNames} from "./gml/gml32/GMLGeometry";
 import {normalizeGMLGeometry, normalizeSrsName} from "./gml/gml32/normalizeGMLGeometry";
+import {tryBuildCircularGeometryJSON} from "./gml/gml32/encodeCircularShapeToJSON";
 
 // mode3D:true unconditionally: this is an internal Feature<->JSON transport format, never inspected
 // directly by anything outside this file, so it should always preserve Z faithfully. Whether the
@@ -61,7 +62,18 @@ export class GMLFeatureEncoder {
     }
 
     encodeFeature(feature: Feature) {
-        const featureAsJSON = this.SingleFeatureGMLasJSONEncode(feature);
+        // Circle/Arc have no GeoJSON representation at all (RIA's own GeoJsonCodec.encode()
+        // throws on them), so they never touch encodeFeatureToGeoJSON/SingleFeatureGMLasJSONEncode
+        // - built directly from the RIA shape's own properties instead.
+        const circularGeometry = feature.shape
+            ? tryBuildCircularGeometryJSON(feature.shape, normalizeSrsName(feature.shape.reference.identifier), feature.id as string)
+            : null;
+        const featureAsJSON: GMLFeature = circularGeometry ? {
+            id: feature.id as string,
+            type: "Feature",
+            geometry: circularGeometry,
+            properties: feature.properties as any
+        } : this.SingleFeatureGMLasJSONEncode(feature);
         const gmlFeature = encodeFeatureToGML(featureAsJSON, { gmlVersion: this.gmlVersion, invert: this.invert, mode3D: this.mode3D });
         return {
             geometryType: featureAsJSON.geometry.type,

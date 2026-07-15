@@ -1,15 +1,26 @@
 import {describe, expect, it} from 'vitest';
 import {AdvancedGMLCodec} from "./AdvancedGMLCodec";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";
-import {createPoint, createPolygon, createPolyline, createShapeList} from "@luciad/ria/shape/ShapeFactory";
+import {
+    createArc,
+    createCircleBy3Points,
+    createCircleByCenterPoint,
+    createPoint,
+    createPolygon,
+    createPolyline,
+    createShapeList
+} from "@luciad/ria/shape/ShapeFactory";
 import {Polyline} from "@luciad/ria/shape/Polyline";
 import {Polygon} from "@luciad/ria/shape/Polygon";
+import {Circle} from "@luciad/ria/shape/Circle";
+import {Arc} from "@luciad/ria/shape/Arc";
 import {ShapeType} from "@luciad/ria/shape/ShapeType";
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {MemoryStore} from "@luciad/ria/model/store/MemoryStore";
 import {Cursor} from "@luciad/ria/model/Cursor";
 import {ProgrammingError} from "@luciad/ria/error/ProgrammingError";
 import {WFSTFeatureStore} from "../../../WFSTFeatureStore";
+import {WFSTInvalidGeometry} from "../../WFSTInvalidGeometry";
 
 const OWS_URL = "http://localhost:8092/geoserver/ows";
 
@@ -28,6 +39,10 @@ function cursorOf(...features: Feature[]): Cursor<Feature> {
 
 function parseXML(content: string): Document {
     return new DOMParser().parseFromString(content, "application/xml");
+}
+
+function normalizeDegrees(degrees: number): number {
+    return ((degrees % 360) + 360) % 360;
 }
 
 describe('AdvancedGMLCodec.encode', () => {
@@ -348,6 +363,167 @@ describe('AdvancedGMLCodec.encodeShape', () => {
     it('returns null for a null shape', () => {
         const codec = new AdvancedGMLCodec();
         expect(codec.encodeShape(null)).toBeNull();
+    });
+});
+
+// Phase 4: Circle and Arc have no GeoJSON representation at all (RIA's own GeoJsonCodec.encode()
+// throws on them), so AdvancedGMLCodec/GMLFeatureEncoder build their GML directly from the RIA
+// shape's own properties instead of going through the usual GeoJSON intermediate step (see
+// tryBuildCircularGeometryJSON). Ellipse/ArcBand/Sector are deliberately NOT covered here - see
+// GMLCodecCircularShapeSupport.test.ts for why: no standard GML 3.2 segment exists for them at
+// all, independent of what RIA's decoder happens to support.
+//
+// Every case here round-trips through encode() and the inherited, real, unmocked
+// GMLCodec.decode() - the same strongest-possible-proof pattern used for every other geometry
+// type above, and the only way to actually verify the math-angle<->compass-azimuth conversion
+// (see encodeGeometryToGML.ts's compassAzimuthSweepToMathAngles) without just re-deriving the
+// same formula by hand in the test.
+//
+// Uses EPSG:4326 directly rather than this file's CRS:84 `reference` constant: writing these
+// tests surfaced a PRE-EXISTING, unrelated bug (affects every geometry type, not just
+// Circle/Arc) where normalizeGMLGeometry's CRS:84 -> "urn:ogc:def:crs:EPSG:4326" srsName rewrite
+// makes the written axis order inconsistent with what that new srsName declares, causing a
+// silent x/y swap on decode - see the follow-up report for a full repro. EPSG:4326 used
+// consistently (no CRS:84 involved, no srsName rewrite) round-trips coordinates correctly and
+// keeps that pre-existing issue from masking whether Circle/Arc's own new encoding is correct.
+describe('AdvancedGMLCodec Circle/Arc support (Phase 4)', () => {
+    const circularReference = getReference("EPSG:4326");
+
+    function circularCursorOf(...features: Feature[]): Cursor<Feature> {
+        const store = new MemoryStore({reference: circularReference});
+        for (const feature of features) store.put(feature);
+        return store.query();
+    }
+
+    it('Circle (via createCircleByCenterPoint): round-trips center and radius', () => {
+        const codec = new AdvancedGMLCodec();
+        const circle = createCircleByCenterPoint(circularReference, createPoint(circularReference, [10, 20]), 500);
+        const feature = new Feature(circle, {label: "circle-cbp"}, "f.circle-cbp");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        expect(content).toContain("gml:CircleByCenterPoint");
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        expect(decoded.id).toBe("f.circle-cbp");
+        const decodedCircle = decoded.shape as Circle;
+        expect(ShapeType.contains(decodedCircle.type, ShapeType.CIRCLE)).toBe(true);
+        expect(decodedCircle.center.x).toBeCloseTo(10, 6);
+        expect(decodedCircle.center.y).toBeCloseTo(20, 6);
+        expect(decodedCircle.radius).toBeCloseTo(500, 6);
+    });
+
+    it('Circle (via createCircleBy3Points): encodes via its resolved center/radius, round-trips the same way', () => {
+        // The encoder has no notion of "how this Circle was originally defined" - both
+        // constructors resolve to the same center/radius properties, so both encode identically
+        // (as gml:CircleByCenterPoint) and round-trip identically. Tolerance is relative to the
+        // radius, not a fixed decimal precision: the 3-point circumcircle fit has a small
+        // (~0.5-1%) but consistent bias on a geodetic reference even for exact input - see
+        // GMLCodecCircularShapeSupport.test.ts, where this was first characterized.
+        const codec = new AdvancedGMLCodec();
+        const circle = createCircleBy3Points(
+            circularReference, createPoint(circularReference, [10, 0]),
+            createPoint(circularReference, [0, 10]), createPoint(circularReference, [-10, 0])
+        );
+        const feature = new Feature(circle, {label: "circle-3pt"}, "f.circle-3pt");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        const decodedCircle = decoded.shape as Circle;
+        const tolerance = circle.radius * 0.05;
+        expect(Math.abs(decodedCircle.center.x - circle.center.x)).toBeLessThan(tolerance);
+        expect(Math.abs(decodedCircle.center.y - circle.center.y)).toBeLessThan(tolerance);
+        expect(Math.abs(decodedCircle.radius - circle.radius)).toBeLessThan(tolerance);
+    });
+
+    it('Circle: Z on the center point survives encode() -> decode()', () => {
+        const codec = new AdvancedGMLCodec();
+        const circle = createCircleByCenterPoint(circularReference, createPoint(circularReference, [10, 20, 77]), 500);
+        const feature = new Feature(circle, {}, "f.circle-3d");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        expect(content).toContain('srsDimension="3"');
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        expect((decoded.shape as Circle).center.z).toBe(77);
+    });
+
+    it('Arc: a partial sweep round-trips center, radius, startAzimuth and sweepAngle', () => {
+        const codec = new AdvancedGMLCodec();
+        const arc = createArc(circularReference, createPoint(circularReference, [0, 0]), 200, 200, 0, 37, -90);
+        const feature = new Feature(arc, {label: "arc-partial"}, "f.arc-partial");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        expect(content).toContain("gml:ArcByCenterPoint");
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        const decodedArc = decoded.shape as Arc;
+        expect(ShapeType.contains(decodedArc.type, ShapeType.ARC)).toBe(true);
+        expect(decodedArc.center.x).toBeCloseTo(0, 6);
+        expect(decodedArc.center.y).toBeCloseTo(0, 6);
+        expect(decodedArc.a).toBeCloseTo(200, 6);
+        expect(decodedArc.b).toBeCloseTo(200, 6);
+        expect(decodedArc.startAzimuth).toBeCloseTo(37, 6);
+        expect(decodedArc.sweepAngle).toBeCloseTo(-90, 6);
+    });
+
+    it('Arc: a positive (clockwise) sweep round-trips correctly too', () => {
+        const codec = new AdvancedGMLCodec();
+        const arc = createArc(circularReference, createPoint(circularReference, [5, 5]), 50, 50, 0, 200, 120);
+        const feature = new Feature(arc, {}, "f.arc-cw");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        const decodedArc = decoded.shape as Arc;
+        // Compare modulo 360: GMLGeometryParser.js's own norm360 calls mean an azimuth/sweep can
+        // legitimately come back as e.g. -160 for an original 200 (same angle, different
+        // representative in [-360,360)) - that's not a round-trip failure.
+        expect(normalizeDegrees(decodedArc.startAzimuth)).toBeCloseTo(normalizeDegrees(200), 6);
+        expect(normalizeDegrees(decodedArc.sweepAngle)).toBeCloseTo(normalizeDegrees(120), 6);
+    });
+
+    it('Arc: a full-circle sweep (360) is encoded without an endAngle and decodes back as sweepAngle -360', () => {
+        const codec = new AdvancedGMLCodec();
+        const arc = createArc(circularReference, createPoint(circularReference, [0, 0]), 10, 10, 0, 45, 360);
+        const feature = new Feature(arc, {}, "f.arc-full");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        expect(content).toContain("startAngle");
+        expect(content).not.toContain("endAngle");
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        const decodedArc = decoded.shape as Arc;
+        // Geometrically identical either way round (a full sweep traces the same circle
+        // regardless of direction) - GMLGeometryParser.js's own convention for "no endAngle" is
+        // always -360, regardless of what the original signed sweep was.
+        expect(decodedArc.sweepAngle).toBeCloseTo(-360, 6);
+    });
+
+    it('Arc: Z on the center point survives encode() -> decode()', () => {
+        const codec = new AdvancedGMLCodec();
+        const arc = createArc(circularReference, createPoint(circularReference, [0, 0, 33]), 10, 10, 0, 0, -180);
+        const feature = new Feature(arc, {}, "f.arc-3d");
+
+        const {content, contentType} = codec.encode(circularCursorOf(feature));
+        expect(content).toContain('srsDimension="3"');
+        const decoded = codec.decode({content, contentType, reference: circularReference}).next();
+
+        expect((decoded.shape as Arc).center.z).toBe(33);
+    });
+
+    it('a genuinely elliptical Arc (a !== b) throws - no standard GML 3.2 representation exists for it', () => {
+        const codec = new AdvancedGMLCodec();
+        const arc = createArc(circularReference, createPoint(circularReference, [0, 0]), 200, 100, 0, 0, -90);
+        const feature = new Feature(arc, {}, "f.arc-elliptical");
+
+        expect(() => codec.encode(circularCursorOf(feature))).toThrow(WFSTInvalidGeometry);
+    });
+
+    it('encodeShape(): encodes a bare Circle shape fragment, decodable via GMLCodec', () => {
+        const codec = new AdvancedGMLCodec();
+        const fragment = codec.encodeShape(createCircleByCenterPoint(circularReference, createPoint(circularReference, [1, 2]), 30));
+        expect(fragment).toContain("gml:CircleByCenterPoint");
     });
 });
 

@@ -183,6 +183,29 @@ export function encodeGeometryToGML(geometry: GMLGeometry, options: EncodeGeomet
             });
             break;
         }
+        case 'Circle': {
+            const curveElement = doc.ele('gml:Curve', GMLProperties(geometry, resolvedIs3D));
+            const segmentElement = curveElement.ele('gml:segments').ele('gml:CircleByCenterPoint');
+            segmentElement.ele('gml:pos').txt(invertCoordinates(geometry.center)).up();
+            segmentElement.ele('gml:radius', {uom: 'm'}).txt(`${geometry.radius}`).up();
+            break;
+        }
+        case 'Arc': {
+            const curveElement = doc.ele('gml:Curve', GMLProperties(geometry, resolvedIs3D));
+            const segmentElement = curveElement.ele('gml:segments').ele('gml:ArcByCenterPoint');
+            segmentElement.ele('gml:pos').txt(invertCoordinates(geometry.center)).up();
+            segmentElement.ele('gml:radius', {uom: 'm'}).txt(`${geometry.radius}`).up();
+            const {startAngle, endAngle, isFullCircle} = compassAzimuthSweepToMathAngles(geometry.startAzimuth, geometry.sweepAngle);
+            segmentElement.ele('gml:startAngle', {uom: 'deg'}).txt(`${startAngle}`).up();
+            // Omitted, not written as startAngle===endAngle: GMLGeometryParser.js treats a
+            // missing endAngle as "full circle", the same outcome its own 0-degree-sweep
+            // (startAngle===endAngle) case produces - so this is the lossless choice, and avoids
+            // ever emitting a degenerate zero-length arc when a full sweep was intended.
+            if (!isFullCircle) {
+                segmentElement.ele('gml:endAngle', {uom: 'deg'}).txt(`${endAngle}`).up();
+            }
+            break;
+        }
         case 'MultiGeometry':
         case 'GeometryCollection': {
             // No posList/pos of its own, so no single is3D fact to assert on the wrapper itself.
@@ -246,6 +269,24 @@ function coordHasZ(coordinates: PointCoordinates): boolean {
     return coordinates.length === 3 && coordinates[2] !== 0;
 }
 
+function norm360(degrees: number): number {
+    return ((degrees % 360) + 360) % 360;
+}
+
+// Inverse of GMLGeometryParser.js's ArcByCenterPoint decoding: that code computes
+// startAzimuth = norm360(90 - startAngle) and, when both startAngle/endAngle are given,
+// sweepAngle = -norm360(endAngle - startAngle) (with a 0-degree delta mapped to -360, i.e. a
+// full circle, identical to what an omitted endAngle produces). This inverts both steps exactly.
+function compassAzimuthSweepToMathAngles(
+    startAzimuth: number, sweepAngle: number
+): {startAngle: number, endAngle: number, isFullCircle: boolean} {
+    const startAngle = norm360(90 - startAzimuth);
+    const isFullCircle = norm360(sweepAngle) === 0; // covers 0, ±360, ±720, ...
+    if (isFullCircle) return {startAngle, endAngle: startAngle, isFullCircle: true};
+    const mathSweep = norm360(-sweepAngle);
+    return {startAngle, endAngle: norm360(startAngle + mathSweep), isFullCircle: false};
+}
+
 // Scans the whole geometry once: true if ANY coordinate has a non-zero Z. OGC GML requires uniform
 // dimensionality within one gml:posList/gml:pos, so for the "flat" geometry types (a single coordinate
 // array under one element) this must be an all-or-nothing decision for the whole element.
@@ -266,6 +307,9 @@ function geometryHasZ(geometry: GMLGeometry): boolean {
         case 'MultiGeometry':
         case 'GeometryCollection':
             return geometry.geometries.some(geometryHasZ);
+        case 'Circle':
+        case 'Arc':
+            return coordHasZ(geometry.center);
         default:
             return false;
     }

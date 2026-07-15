@@ -11,6 +11,7 @@ import {encodeFeatureToGML, GMLFeature} from "./encodeFeatureToGML";
 import {encodeGeometryToGML} from "./encodeGeometryToGML";
 import {GMLGeometry} from "./GMLGeometry";
 import {normalizeGMLGeometry, normalizeSrsName} from "./normalizeGMLGeometry";
+import {tryBuildCircularGeometryJSON} from "./encodeCircularShapeToJSON";
 import {GMLFeatureEncoder} from "../../GMLFeatureEncoder";
 
 export interface AdvancedGMLCodecConstructorOptions extends GMLCodecConstructorOptions {
@@ -101,12 +102,18 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
      */
     encodeShape(shape: Shape | null): string | null {
         if (!shape) return null;
-        const geoJsonGeometry = this.shapeCodec.encodeShape(shape);
-        if (!geoJsonGeometry) return null;
-        const gmlGeometry = normalizeGMLGeometry({
-            ...geoJsonGeometry,
-            srsName: normalizeSrsName(shape.reference.identifier)
-        } as GMLGeometry);
+        const srsName = normalizeSrsName(shape.reference.identifier);
+        // Circle/Arc have no GeoJSON representation at all (shapeCodec.encodeShape() throws on
+        // them) - built directly from the shape's own properties instead of going through it.
+        const circularGeometry = tryBuildCircularGeometryJSON(shape, srsName, AdvancedGMLCodec.generateId('shape'));
+        let gmlGeometry: GMLGeometry;
+        if (circularGeometry) {
+            gmlGeometry = circularGeometry;
+        } else {
+            const geoJsonGeometry = this.shapeCodec.encodeShape(shape);
+            if (!geoJsonGeometry) return null;
+            gmlGeometry = normalizeGMLGeometry({...geoJsonGeometry, srsName} as GMLGeometry);
+        }
         return encodeGeometryToGML(gmlGeometry, {
             gmlVersion: this.gmlVersion,
             usePosList: this.usePosListOption,
@@ -130,11 +137,23 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
     }
 
     private toGMLFeatureJSON(feature: Feature): GMLFeature {
-        const {content, srsName} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
+        // feature.shape is guaranteed non-null here - encodeFeatureInto (the only caller) already
+        // throws on a shapeless feature before reaching this method.
+        const srsName = normalizeSrsName(feature.shape.reference.identifier);
+        const circularGeometry = tryBuildCircularGeometryJSON(feature.shape, srsName, feature.id as string);
+        if (circularGeometry) {
+            return {
+                id: feature.id as string,
+                type: "Feature",
+                geometry: circularGeometry,
+                properties: feature.properties as any
+            };
+        }
+        const {content} = GMLFeatureEncoder.encodeFeatureToGeoJSON(feature);
         const featureAsJson = JSON.parse(content) as GMLFeature;
         featureAsJson.geometry = normalizeGMLGeometry({
             ...featureAsJson.geometry,
-            srsName: normalizeSrsName(srsName)
+            srsName
         });
         return featureAsJson;
     }

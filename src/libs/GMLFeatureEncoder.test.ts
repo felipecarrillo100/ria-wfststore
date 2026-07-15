@@ -1,8 +1,12 @@
 import {describe, expect, it} from 'vitest';
 import {GMLFeatureEncoder} from "./GMLFeatureEncoder";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";
-import {createPoint, createPolygon, createPolyline, createShapeList} from "@luciad/ria/shape/ShapeFactory";
+import {createArc, createCircleByCenterPoint, createPoint, createPolygon, createPolyline, createShapeList} from "@luciad/ria/shape/ShapeFactory";
 import {Feature} from "@luciad/ria/model/feature/Feature";
+import {GMLCodec} from "@luciad/ria/model/codec/GMLCodec";
+import {Circle} from "@luciad/ria/shape/Circle";
+import {Arc} from "@luciad/ria/shape/Arc";
+import {WFSTInvalidGeometry} from "./WFSTInvalidGeometry";
 
 // First-ever direct unit test for this class (previously only indirectly exercised via
 // AdvancedGMLCodec, which only calls the static encodeFeatureToGeoJSON helper, never
@@ -135,5 +139,71 @@ describe('GMLFeatureEncoder wrapToMulti* branches', () => {
         expect(geometryType).toBe("MultiPoint");
         expect(geometry).toContain('gml:MultiPoint');
         expect((geometry.match(/pointMember/g) || []).length).toBe(4);
+    });
+});
+
+// Phase 4: Circle/Arc bypass the usual GeoJSON-intermediate path entirely (see
+// tryBuildCircularGeometryJSON), built directly from the RIA shape instead. This is the actual
+// production WFS-T write path (WFSTQueries.singleAdd2_0_0/singleUpdate2_0_0 call
+// encoder.encodeFeature() directly), so it's verified separately from AdvancedGMLCodec's own
+// tests for the same underlying shared helper. gml:GeometryPropertyType is used as the target -
+// there is no dedicated "Circle"/"Arc"/"Curve" schema type in GMLGeometryTypeToGeometry's map
+// (mirroring real DescribeFeatureType practice: a column that can hold a curve is typed generic).
+describe('GMLFeatureEncoder Circle/Arc support (Phase 4)', () => {
+    const circularReference = getReference("EPSG:4326");
+
+    // encodeFeature()'s `geometry` return value is already unwrapped from its own <geometry>
+    // container (see GMLFeatureEncoder.XMLUnwrap) - re-wrap it for a real GMLCodec.decode() call,
+    // the same pattern GMLCodecCircularShapeSupport.test.ts uses.
+    function decodeGeometryFragment(geometryXML: string) {
+        const codec = new GMLCodec();
+        const content = `<?xml version="1.0" encoding="UTF-8"?>
+<gml:FeatureCollection xmlns:gml="http://www.opengis.net/gml/3.2" gml:id="FC1">
+  <gml:featureMember>
+    <gml:Feature gml:id="f.1"><geometry>${geometryXML}</geometry></gml:Feature>
+  </gml:featureMember>
+</gml:FeatureCollection>`;
+        const cursor = codec.decode({content, contentType: "application/gml+xml; version=3.2", reference: circularReference});
+        return cursor.hasNext() ? cursor.next() : null;
+    }
+
+    it('Circle: encodeFeature() output is decodable and preserves center/radius', () => {
+        const encoder = new GMLFeatureEncoder({targetGeometry: "gml:GeometryPropertyType"});
+        const circle = createCircleByCenterPoint(circularReference, createPoint(circularReference, [10, 20]), 250);
+        const feature = new Feature(circle, {label: "circle"}, "f.circle");
+
+        const {geometry, geometryType} = encoder.encodeFeature(feature);
+        expect(geometryType).toBe("Circle");
+        expect(geometry).toContain("gml:CircleByCenterPoint");
+
+        const decoded = decodeGeometryFragment(geometry);
+        const decodedCircle = decoded.shape as Circle;
+        expect(decodedCircle.center.x).toBeCloseTo(10, 6);
+        expect(decodedCircle.center.y).toBeCloseTo(20, 6);
+        expect(decodedCircle.radius).toBeCloseTo(250, 6);
+    });
+
+    it('Arc: encodeFeature() output is decodable and preserves center/radius/azimuth/sweep', () => {
+        const encoder = new GMLFeatureEncoder({targetGeometry: "gml:GeometryPropertyType"});
+        const arc = createArc(circularReference, createPoint(circularReference, [0, 0]), 100, 100, 0, 45, -60);
+        const feature = new Feature(arc, {}, "f.arc");
+
+        const {geometry, geometryType} = encoder.encodeFeature(feature);
+        expect(geometryType).toBe("Arc");
+        expect(geometry).toContain("gml:ArcByCenterPoint");
+
+        const decoded = decodeGeometryFragment(geometry);
+        const decodedArc = decoded.shape as Arc;
+        expect(decodedArc.a).toBeCloseTo(100, 6);
+        expect(decodedArc.startAzimuth).toBeCloseTo(45, 6);
+        expect(decodedArc.sweepAngle).toBeCloseTo(-60, 6);
+    });
+
+    it('an elliptical Arc (a !== b) throws through GMLFeatureEncoder too, not just AdvancedGMLCodec', () => {
+        const encoder = new GMLFeatureEncoder({targetGeometry: "gml:GeometryPropertyType"});
+        const arc = createArc(circularReference, createPoint(circularReference, [0, 0]), 100, 50, 0, 0, -90);
+        const feature = new Feature(arc, {}, "f.arc-elliptical");
+
+        expect(() => encoder.encodeFeature(feature)).toThrow(WFSTInvalidGeometry);
     });
 });
