@@ -91,7 +91,10 @@ export function MainMapPanel() {
         feature,
         onSave: (properties: Record<string, unknown>) => {
           const updated = new Feature(feature.shape, properties, feature.id)
-          ;(store as WFSTFeatureStore).add(updated).catch((err: unknown) =>
+          // store is WFSTFeatureStore | WFSTFeatureLockStore - add() is async on the former,
+          // sync on the latter (matching RIA's own Store.add() contract: FeatureId | Promise<FeatureId>).
+          // Promise.resolve(...) handles both without an unsafe cast or an instanceof branch.
+          Promise.resolve(store.add(updated)).catch((err: unknown) =>
             console.error('WFS-T add failed:', err)
           )
         },
