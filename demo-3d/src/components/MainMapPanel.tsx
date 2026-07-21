@@ -23,6 +23,7 @@ import { getReference } from '@luciad/ria/reference/ReferenceProvider.js'
 import { WMSTileSetModel } from '@luciad/ria/model/tileset/WMSTileSetModel.js'
 import { WMSTileSetLayer } from '@luciad/ria/view/tileset/WMSTileSetLayer.js'
 import { EditController } from '@luciad/ria/view/controller/EditController.js'
+import type { Controller } from '@luciad/ria/view/controller/Controller.js'
 import { useLuciadMapContext } from '../context/LuciadMapContext'
 import { useMap } from '../hooks/useMap'
 import { throttle } from '../utils/throttle'
@@ -31,6 +32,7 @@ import {LayerBuilder, type AddWfsLayerPayload, type Add3DTilesPayload} from '../
 import { layerWfstRegistry } from '../modules/luciad/factories/LayerFactory'
 import { populateWfsContextMenu, WFS_CONTEXT_MENU_ICONS } from '../modules/luciad/contextmenu/FeatureContextMenu'
 import { createDrawController, getDrawToolFromController, findFirstEditableLayer } from '../modules/luciad/controllers/DrawToolsHelper'
+import { create3DEditController, edit3DGeometryController, getShape3DEditToolFromController, type ThreeDEditTool } from '../modules/luciad/controllers/Shape3DEditHelper'
 import { EditFeaturePropertiesForm } from './forms/feature/EditFeaturePropertiesForm'
 import { EditWFSTFeaturesWithLockForm } from './forms/feature/wfstlock/EditWFSTFeaturesWithLockForm'
 import { EditCurrentLockForm } from './forms/feature/wfstlock/EditCurrentLockForm'
@@ -39,6 +41,15 @@ import { DemoWFSTDelegateScreen } from '../modules/luciad/wfst/DemoWFSTDelegateS
 import { WFSTFeatureStore, WFSTFeatureLockStore, WFSTFeatureLocksStorage } from 'ria-wfststore'
 import { MapLayersComponent } from './MapLayersComponent'
 import type { DrawTool } from '../types/AppState'
+
+// Combines the 2D (BasicCreateController) and 3D (Shape3DEditController) tag-recovery helpers into
+// one lookup, since only one controller is ever active on the map and both use the same
+// __drawTool tagging convention.
+function resolveActiveDrawTool(ctrl: Controller | null): DrawTool {
+  const tool2d = getDrawToolFromController(ctrl)
+  if (tool2d !== 'select') return tool2d
+  return getShape3DEditToolFromController(ctrl) ?? 'select'
+}
 
 // onActivate/onResize were added in react-dockable-desktop 4.1.0; type definitions lag behind.
 type Contract41 = ReturnType<typeof useFormContainer> & {
@@ -79,6 +90,17 @@ export function MainMapPanel() {
         resolve()
       })
     map.controller = editController
+  }
+
+  // Stable ref for the "Edit 3D geometry" context menu action - unlike openEditGeomRef above,
+  // Shape3DEditController already self-deactivates (sets map.controller = null itself) once
+  // editing ends, so no onDeactivate wrapping is needed here.
+  const openEdit3DGeomRef = useRef<((feature: Feature, layer: FeatureLayer) => void) | null>(null)
+  openEdit3DGeomRef.current = (feature: Feature, layer: FeatureLayer) => {
+    const map = mapRef.current
+    if (!map) return
+    const ctrl = edit3DGeometryController(feature, layer)
+    if (ctrl) map.controller = ctrl
   }
 
   // Wire the delegate's new-feature handler: called by the store when a drawn feature has
@@ -222,9 +244,9 @@ export function MainMapPanel() {
 
     // Publish draw tool state whenever the controller changes — MainMapPanel is the
     // authoritative owner of this map's controller state (user's architecture).
-    setDrawTool(panelId, getDrawToolFromController(map.controller ?? null))
+    setDrawTool(panelId, resolveActiveDrawTool(map.controller ?? null))
     const controllerHandle = map.on('ControllerChanged', (newCtrl: any) => {
-      setDrawTool(panelId, getDrawToolFromController(newCtrl))
+      setDrawTool(panelId, resolveActiveDrawTool(newCtrl))
     })
 
     return () => {
@@ -279,6 +301,7 @@ export function MainMapPanel() {
               populateWfsContextMenu(contextMenu, features, wfst, layerMap,
                 (feature) => openEditPropsRef.current?.(feature, layer),
                 (feature) => openEditGeomRef.current?.(feature, layer),
+                (feature) => openEdit3DGeomRef.current?.(feature, layer),
                 (featureList) => openDeleteRef.current?.(featureList, layer),
                 (featureList) => openEditWithLockRef.current?.(featureList, layer),
               )
@@ -359,6 +382,16 @@ export function MainMapPanel() {
         }
         const ctrl = createDrawController(tool, () => layer)
         map.controller = ctrl
+      }
+      if (cmd.type === 'SET_3D_EDIT_TOOL') {
+        const { tool, panelId: targetId } = cmd.payload as { tool: ThreeDEditTool; panelId: string }
+        if (targetId !== panelId) return
+        const layer = currentLayersRef.current[panelId] ?? findFirstEditableLayer(map)
+        if (!layer) {
+          handleNoEditableLayer()
+          return
+        }
+        map.controller = create3DEditController(tool, layer)
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps

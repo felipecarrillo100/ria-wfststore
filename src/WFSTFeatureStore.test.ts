@@ -3,6 +3,7 @@ import {WFSCapabilitiesExtended} from "./WFSCapabilitiesExtended";
 import {WFSTFeatureStore} from "./WFSTFeatureStore";
 import {WFSTDelegateScreenHelper} from "./libs/screen/WFSTDelegateScreenHelper";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";
+import {createTransformation} from "@luciad/ria/transformation/TransformationFactory";
 import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {AdvancedGMLCodec} from "./libs/gml/gml32/AdvancedGMLCodec";
 import {bbox} from "@luciad/ria/ogc/filter/FilterFactory";
@@ -648,6 +649,35 @@ describe('WFSTFeatureStore 3D support (live GeoServer round-trip)', () => {
 
         await store.remove(id);
     });
+
+    // Live GeoServer regression guard, no mocking, real encoder - confirmed via this exact test:
+    // this library never reprojects a feature's geometry before encoding it, and sets srsName to
+    // literally describe whatever reference the shape already carries (see GMLFeatureEncoder.ts /
+    // AdvancedGMLCodec.ts, both pull srsName from `shape.reference.identifier`). That's fine as
+    // long as the shape's reference matches the target layer's own reference - which every other
+    // test in this describe block deliberately arranges via CreateGeoserverStore's own `reference`
+    // (the layer's advertised default, geographic). This test is the one exception: it builds the
+    // exact same point converted to EPSG:4978 (geocentric) - the reference ria-3d-shape-editor's
+    // demo-3d integration always uses, since a 3D map's own reference must be EPSG:4978 for the
+    // height handle to work at all - and sends it as-is. GeoServer's own GeoTools CRS engine
+    // rejects the Transaction outright with "No transformation available from system
+    // CartesianCS[...geocentric...] to CartesianCS[Geocentric]" (confirmed via the raw GML/JSON
+    // wire response in manual testing this session) - so `store.add()` resolves null, exactly like
+    // the CircularArcByCenterPoint-rejection guard above. See KNOWN_ISSUES.md for the full writeup
+    // and the two candidate fixes (reproject client-side before encoding, in this library or in
+    // the consuming app).
+    it('add(): a shape whose reference is EPSG:4978 (geocentric) is rejected at the Transaction level - this library never reprojects before encoding', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        const epsg4978 = getReference("EPSG:4978");
+        const pointInLayerRef = createPoint(reference, [50, 60, 123]);
+        const pointInEpsg4978 = createTransformation(reference, epsg4978).transform(pointInLayerRef);
+        const feature = new Feature(pointInEpsg4978, {label: "3d-point-geocentric"}, 1);
+
+        const id = await store.add(feature);
+
+        expect(id).toBeNull();
+    }, 15000);
 
     it('adds a 3D polygon and reads back Z on every vertex through a real WFS-T Transaction', async () => {
         const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});

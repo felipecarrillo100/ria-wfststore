@@ -1,0 +1,37 @@
+{
+  "name": "ria-wfststore-demo-3d",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@luciad/ria": "^2026.0.8",
+    "@mui/icons-material": "^9.1.1",
+    "@mui/material": "^9.1.1",
+    "@rjsf/core": "^6.6.2",
+    "@rjsf/mui": "^6.6.2",
+    "@rjsf/utils": "^6.6.2",
+    "@rjsf/validator-ajv8": "^6.6.2",
+    "react": "^19.2.6",
+    "react-dockable-desktop": "^4.2.1",
+    "react-dom": "^19.2.6",
+    "ria-3d-shape-editor": "file:../../ria-3d-shape-editor/ria-3d-shape-editor-0.1.0.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true
+  }
+}

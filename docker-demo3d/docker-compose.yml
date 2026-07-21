@@ -1,0 +1,59 @@
+services:
+  postgis:
+    image: imresamu/postgis:17-3.5-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  geoserver:
+    image: kartoza/geoserver:2.28.4
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD}
+      CORS_ENABLED: "true"
+      INITIAL_MEMORY: 512M
+      MAXIMUM_MEMORY: 1G
+    ports:
+      - "${GEOSERVER_PORT}:8080"
+    volumes:
+      - geoserver_data:/opt/geoserver_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail -s http://localhost:8080/geoserver/web/ -o /dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  geoserver-bootstrap:
+    build: ./bootstrap
+    depends_on:
+      geoserver:
+        condition: service_healthy
+    environment:
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD}
+      GEOSERVER_WORKSPACE: ${GEOSERVER_WORKSPACE}
+      GEOSERVER_DATASTORE: ${GEOSERVER_DATASTORE}
+      PGHOST: postgis
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    restart: "no"
+
+volumes:
+  postgis_data:
+  geoserver_data:
