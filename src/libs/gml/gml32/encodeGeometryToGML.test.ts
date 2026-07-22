@@ -125,6 +125,22 @@ describe('encodeGeometryToGML - axis invert never swaps Z', () => {
     });
 });
 
+describe('encodeGeometryToGML - GeoServer EPSG:4979 srsName workaround', () => {
+    // See the GeoServerWorkAround doc comment in encodeGeometryToGML.ts for the full story: this
+    // exact URN triggers a ClassCastException in GeoServer's WFS-T insert handling, even though
+    // GeoServer's own GetCapabilities is what tells clients to use it as this CRS's srsName.
+    it('rewrites the EPSG:4979 URN to the short form GeoServer/LuciadFusion both accept', () => {
+        const geometry = {type: 'Point', id: 'p.1', srsName: 'urn:ogc:def:crs:EPSG::4979', coordinates: [10, 20, 55]} as GMLGeometry;
+        const doc = parseXML(encodeGeometryToGML(geometry, {}));
+        expect(doc.getElementsByTagName('gml:Point')[0].getAttribute('srsName')).toBe('EPSG:4979');
+    });
+
+    it('leaves every other srsName untouched - the workaround is scoped to this one CRS/string', () => {
+        const doc = parseXML(encodeGeometryToGML(point([10, 20]), {}));
+        expect(doc.getElementsByTagName('gml:Point')[0].getAttribute('srsName')).toBe('CRS:84');
+    });
+});
+
 describe('encodeGeometryToGML - usePosList:false with 3D', () => {
     it('each individual gml:pos child carries the correct 3-value triplet', () => {
         const doc = parseXML(encodeGeometryToGML(lineString([[0, 0, 1], [1, 1, 2]]), {usePosList: false}));

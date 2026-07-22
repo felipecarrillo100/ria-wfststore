@@ -62,10 +62,11 @@ fi
 publish_featuretype() {
   local name="$1"
   local title="$2"
+  local srs="${3:-EPSG:4326}"
   if [ "$(http_status "$GS_URL/rest/workspaces/$WORKSPACE/datastores/$DATASTORE/featuretypes/$name.json")" != "200" ]; then
-    log "Publishing featuretype $name"
+    log "Publishing featuretype $name ($srs)"
     curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" \
-      -d "{\"featureType\":{\"name\":\"$name\",\"nativeName\":\"$name\",\"title\":\"$title\",\"srs\":\"EPSG:4326\",\"enabled\":true}}" \
+      -d "{\"featureType\":{\"name\":\"$name\",\"nativeName\":\"$name\",\"title\":\"$title\",\"srs\":\"$srs\",\"enabled\":true}}" \
       "$GS_URL/rest/workspaces/$WORKSPACE/datastores/$DATASTORE/featuretypes"
   else
     log "Featuretype $name already published"
@@ -73,6 +74,7 @@ publish_featuretype() {
 }
 
 publish_featuretype "edit3d_features" "ria-3d-shape-editor persistent demo layer"
+publish_featuretype "edit3d_features_4979" "EPSG:4979 true-3D test layer" "EPSG:4979"
 
 log "Granting anonymous write access to $WORKSPACE layers (default GeoServer ACL restricts writes to admin roles)"
 grant_anonymous_write() {
@@ -88,6 +90,7 @@ grant_anonymous_write() {
     "$GS_URL/rest/security/acl/layers"
 }
 grant_anonymous_write "edit3d_features"
+grant_anonymous_write "edit3d_features_4979"
 
 # Deliberately NO truncate step here, unlike docker/bootstrap/bootstrap.sh - this stack is meant
 # to persist real edited data across restarts while running the demo, not reset on every startup.

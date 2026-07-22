@@ -9,6 +9,7 @@ import type { ContextMenu as LuciadContextMenu } from '@luciad/ria/view/ContextM
 import type { Feature } from '@luciad/ria/model/feature/Feature.js'
 import type { RIAMap } from '@luciad/ria/view/RIAMap.js'
 import { isEdit3DGeometrySupported } from '../controllers/Shape3DEditHelper'
+import {getReference} from "@luciad/ria/reference/ReferenceProvider.js";
 
 export function populateWfsContextMenu(
   contextMenu: LuciadContextMenu,
@@ -56,6 +57,16 @@ export function populateWfsContextMenu(
         id: 'wfs-edit-props', label: 'Edit properties',
         action: () => { onEditProperties?.(feature) },
       })
+      contextMenu.addItem({
+        id: 'wfs-edit-geom-qq', label: 'Ref' + feature.shape?.reference?.identifier,
+        action: () => { console.log("qq") },
+      })
+      if (feature.shape?.reference?.equals(getReference("EPSG:4979"))) {
+        contextMenu.addItem({
+          id: 'wfs-edit-geom-q', label: 'Edit geom q',
+          action: () => { console.log("q") },
+        })
+      }
     }
 
     // Delete — works for one or many
