@@ -3,6 +3,10 @@
 // Define a mapping from XSD types to JSON types
 import {Feature} from "@luciad/ria/model/feature/Feature";
 
+/**
+ * The geometry type names this library distinguishes between when validating a feature's
+ * geometry against a WFS feature type's schema - see {@link areCompatibleGeometries}.
+ */
 export type GeoJSONGeometryType =
     "Point" |
     "LineString" |
@@ -17,7 +21,9 @@ export type GeoJSONGeometryType =
     "Circle" |
     "Arc";
 
+/** The JSON Schema primitive types an XSD property type can map to - see {@link xsdToJsonMap}. */
 export type BasicJSONSchema7TypeName = "string" | "number" | "boolean";
+/** Maps every XSD simple type this library recognizes in a `DescribeFeatureType` schema to its JSON Schema equivalent - see {@link mapXsdTypeToJsonType}. */
 export const xsdToJsonMap: { [key: string]: BasicJSONSchema7TypeName } = {
     // String mappings
     "xsd:string": "string",
@@ -57,9 +63,12 @@ export const xsdToJsonMap: { [key: string]: BasicJSONSchema7TypeName } = {
     // Boolean mappings
     "xsd:boolean": "boolean"
 };
+/** Any XSD simple type key {@link xsdToJsonMap} recognizes. */
 export type XSDTypeKey = keyof typeof xsdToJsonMap;
 
+/** The GML geometry property type names this library recognizes in a `DescribeFeatureType` schema - see {@link GMLGeometryTypeToGeometry}. */
 export type GMLGeometryNames = "Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString" | "MultiPolygon" | "Geometry" | "MultiGeometry" | "MultiSurface" | "MultiCurve";
+/** Maps a schema's `gml:*PropertyType` attribute value to the plain geometry name it represents - see {@link GMLGeometryTypeToGeometry}, {@link areCompatibleGeometries}. */
 const gmlToJSONGeometry: { [key: string]: GMLGeometryNames } = {
     // String mappings
     "gml:PointPropertyType": "Point",
@@ -74,13 +83,20 @@ const gmlToJSONGeometry: { [key: string]: GMLGeometryNames } = {
     // Added for geoserver
     "gml:MultiSurfacePropertyType": "MultiSurface",
 }
+/** Any GML geometry property type key {@link gmlToJSONGeometry} recognizes. */
 export type GMLGeometryTypeKey = keyof typeof xsdToJsonMap;
 
+/**
+ * @param key a schema's `gml:*PropertyType` attribute value.
+ * @returns the plain geometry name it represents.
+ * @throws {Error} if `key` isn't a recognized GML geometry property type.
+ */
 export function GMLGeometryTypeToGeometry(key: GMLGeometryTypeKey) {
     if (typeof gmlToJSONGeometry[key] !== "undefined") return gmlToJSONGeometry[key] as GMLGeometryNames;
     throw new Error('Unsupported target geometry type');
 }
 
+/** One non-geometry (`xsd:*`-typed) element from a feature type's `DescribeFeatureType` schema. */
 export interface XsdElement {
     name?: string;
     type?: XSDTypeKey;
@@ -88,6 +104,7 @@ export interface XsdElement {
     substitutionGroup?: string;
 }
 
+/** Like {@link XsdElement}, but for the geometry element specifically (`gml:*`-typed instead of `xsd:*`-typed). */
 interface XsdGeometryElement {
     name?: string;
     type?: GMLGeometryTypeKey;
@@ -96,6 +113,12 @@ interface XsdGeometryElement {
 }
 
 
+/**
+ * A feature type's parsed `DescribeFeatureType` schema - which element is the geometry, which
+ * are plain properties, the feature element itself, and the type's namespace. Produced by
+ * {@link parseWFSFeatureDescription}; consumed throughout {@link WFSTFeatureStore} to validate
+ * and encode features against the actual schema the service advertises.
+ */
 export interface WFSFeatureDescription {
     geometry: XsdGeometryElement;
     properties: XsdElement[];
@@ -104,6 +127,17 @@ export interface WFSFeatureDescription {
     shortTns: string;
 }
 
+/**
+ * Parses a WFS `DescribeFeatureType` response into a {@link WFSFeatureDescription}: finds the
+ * `xsd:extension` of `gml:AbstractFeatureType` for this feature type, then splits its child
+ * elements into the geometry element (any `gml:`-typed one) and the plain properties (any
+ * `xsd:`-typed ones).
+ *
+ * @param xmlContent the raw `DescribeFeatureType` XML response body.
+ * @returns the parsed schema. If the expected `gml:AbstractFeatureType` extension isn't found at
+ *          all, returns a description with `geometry`/`feature`/`shortTns` all null and
+ *          `properties` empty, rather than throwing.
+ */
 export function parseWFSFeatureDescription(xmlContent: string): WFSFeatureDescription {
     // Create a new DOMParser instance
     const parser = new DOMParser();
@@ -197,6 +231,14 @@ export function parseWFSFeatureDescription(xmlContent: string): WFSFeatureDescri
 }
 
 
+/**
+ * Builds an empty properties object matching `featureDescription`'s schema, with every property
+ * defaulted per its JSON type (`""` for string, `0` for number, `false` for boolean) - used as
+ * the starting point for a brand-new feature's properties.
+ *
+ * @param featureDescription the schema to build defaults from.
+ * @returns the defaulted properties object.
+ */
 export function populateFeatureProperties(featureDescription: WFSFeatureDescription) {
     const properties = {} as any;
     for (const property of featureDescription.properties) {
@@ -217,6 +259,17 @@ export function populateFeatureProperties(featureDescription: WFSFeatureDescript
     return properties;
 }
 
+/**
+ * Coerces `properties[key]` to the JS type its schema element (`featureTemplate`) declares
+ * (string/number/boolean), so a feature's properties always match the types the server expects
+ * regardless of how the caller supplied them.
+ *
+ * @param featureTemplate the schema to look `key`'s declared type up in.
+ * @param properties      the properties object containing `key`.
+ * @param key             the property name to coerce.
+ * @returns the coerced value, or the original value unchanged if `key` isn't in the schema or is
+ *          `undefined`.
+ */
 function setProperVariableType(featureTemplate: WFSFeatureDescription, properties: {[key:string]: any}, key: string) {
     const element = featureTemplate.properties.find(p=>p.name===key);
     const value = properties[key];
@@ -234,6 +287,19 @@ function setProperVariableType(featureTemplate: WFSFeatureDescription, propertie
     }
 }
 
+/**
+ * Builds a new {@link Feature} whose properties match `featureTemplate`'s schema exactly: known
+ * properties are coerced to their declared type (see {@link setProperVariableType}), and missing
+ * ones are defaulted (see {@link populateFeatureProperties}) - used by
+ * {@link WFSTFeatureStore.add}/{@link WFSTFeatureLockStore.add} before validating/encoding a new
+ * feature.
+ *
+ * @param featureTemplate the schema to standardize against.
+ * @param feature         the feature whose properties should be standardized.
+ * @returns the rebuilt feature, and whether every one of `feature`'s original properties was
+ *          already present and defined (false if any were missing, which callers use to trigger
+ *          an "edit properties" prompt instead of sending an incomplete feature).
+ */
 export function standardizeProperties(featureTemplate: WFSFeatureDescription, feature: Feature) {
     let newFeature;
     let validProperties = true;
@@ -261,11 +327,22 @@ export function standardizeProperties(featureTemplate: WFSFeatureDescription, fe
 
 
 
+/** @returns the JSON Schema type `xsdType` maps to via {@link xsdToJsonMap}, or `"unknown"` if it isn't recognized. */
 function mapXsdTypeToJsonType(xsdType: XSDTypeKey): string {
     // Return the mapped JSON type or 'unknown' if not found
     return xsdToJsonMap[xsdType] || "unknown";
 }
 
+/**
+ * Checks whether a feature's own geometry type (`geoJSONType`, as returned by
+ * `GMLFeatureEncoder.getGeometryTypeName`) can be written into a schema field declared as
+ * `gmlTypeKey` - e.g. a `Point` feature is compatible with a field typed `MultiPoint` or the
+ * fully-generic `Geometry`/`MultiGeometry`, but not with a field typed `Polygon`.
+ *
+ * @param geoJSONType the feature's own geometry type.
+ * @param gmlTypeKey  the schema field's declared GML geometry property type.
+ * @returns true if compatible.
+ */
 export function areCompatibleGeometries(geoJSONType: GeoJSONGeometryType, gmlTypeKey: GMLGeometryTypeKey): boolean {
     // Define compatibility rules
     const compatibilityMap: { [key in GeoJSONGeometryType]: GMLGeometryNames[] } = {

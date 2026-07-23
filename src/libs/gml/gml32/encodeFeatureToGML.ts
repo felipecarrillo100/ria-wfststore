@@ -5,6 +5,7 @@ import {GMLGeometry} from "./GMLGeometry";
 
 // Define types for geometries and features
 
+/** The internal, GeoJSON-Feature-shaped representation {@link encodeFeatureToGML} consumes - built by {@link GMLFeatureEncoder}/{@link AdvancedGMLCodec}. */
 export interface GMLFeature {
     id: string;
     type?: "Feature";
@@ -12,17 +13,30 @@ export interface GMLFeature {
     properties: {[key:string]: string};
 }
 
+/** Options for {@link encodeFeatureToGML}. */
 export interface EncodeFeatureToGMLOptions {
     usePosList?: boolean;
     invert?: boolean;
     gmlVersion?: '3.2' | '3.1.1';
+    /** An existing element to append the encoded `<gml:Feature>` into, instead of starting a new standalone document. */
     inDoc?: XMLBuilder;
     // See EncodeGeometryToGMLOptions.mode3D in encodeGeometryToGML.ts: true/false forces 3D/2D,
     // undefined auto-detects from the geometry's own coordinates.
+    /** See `EncodeGeometryToGMLOptions.mode3D` in `encodeGeometryToGML.ts`: true/false forces 3D/2D, undefined auto-detects from the geometry's own coordinates. */
     mode3D?: boolean;
 }
 
 // Function to encode a feature to GML 3.2
+/**
+ * Encodes a {@link GMLFeature} into a `<gml:Feature>` element: its properties as `app:`-namespaced
+ * child elements, and its geometry (delegated to {@link encodeGeometryToGML}) wrapped in a plain
+ * `<geometry>` element.
+ *
+ * @param feature the feature to encode.
+ * @param options see {@link EncodeFeatureToGMLOptions}.
+ * @returns the encoded XML - a full standalone document (own XML declaration) when `options.inDoc`
+ *          is omitted, or just the appended fragment's serialization when it's supplied.
+ */
 export function encodeFeatureToGML(feature: GMLFeature, options?: EncodeFeatureToGMLOptions): string {
     options = options ? options : {};
     const doc = options.inDoc ? options.inDoc : create({ version: '1.0', encoding: 'UTF-8' });

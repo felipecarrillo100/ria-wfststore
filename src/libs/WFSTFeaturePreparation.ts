@@ -5,23 +5,41 @@ import {GeoJsonCodec} from "@luciad/ria/model/codec/GeoJsonCodec";
 import {AdvancedGMLCodec} from "./gml/gml32/AdvancedGMLCodec";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider";
 
-// Safety net, not the primary compatibility check (see areCompatibleGeometries in
-// ParseWFSFeatureDescription.ts for that): throws if the GML geometry type GMLFeatureEncoder
-// actually produced still doesn't match what the server's DescribeFeatureType advertised for
-// this field, which would mean wrapToMulti*/normalizeGMLGeometry didn't already reconcile it.
+/**
+ * Safety net, not the primary compatibility check (see `areCompatibleGeometries` in
+ * `ParseWFSFeatureDescription.ts` for that): throws if the GML geometry type
+ * {@link GMLFeatureEncoder} actually produced still doesn't match what the server's
+ * `DescribeFeatureType` advertised for this field, which would mean `wrapToMulti*`/
+ * `normalizeGMLGeometry` didn't already reconcile it.
+ *
+ * @param geometry       the geometry type name actually produced.
+ * @param targetGeometry the schema field's declared GML geometry property type.
+ * @throws {WFSTInvalidGeometry} if `geometry` doesn't match `targetGeometry` (unless
+ *         `targetGeometry` is the fully-generic `"Geometry"`, which accepts anything).
+ */
 export function verifyGeometryCompatibilityOrThrowError(geometry: string, targetGeometry: GMLGeometryTypeKey): void {
     if (GMLGeometryTypeToGeometry(targetGeometry) === "Geometry") return;
     if (geometry !== GMLGeometryTypeToGeometry(targetGeometry)) throw new WFSTInvalidGeometry(`${targetGeometry}`);
 }
 
-// Decodes a feature previously stored as either a JSON or a GML string (WFSTFeatureLockStore's
-// insertedIds/updatedIds bookkeeping, see WFSTFeatureLocksStorage) back into a real Feature, so
-// it can be re-templated into WFS-T XML when a lock is committed. WFSTFeatureLockStore stores GML
-// instead of GeoJSON specifically when its own delegate store is GML-configured (see its
-// useGMLSerialization) - GeoJSON cannot represent Circle/Arc at all, so a locked Circle/Arc edit
-// could never survive a commit otherwise. The two formats are trivially distinguishable by their
-// first character (GML always starts with an XML declaration/tag, JSON always with "{"), so
-// detecting from content avoids threading a separate format flag through the lock item itself.
+/**
+ * Decodes a feature previously stored as either a JSON or a GML string
+ * ({@link WFSTFeatureLockStore}'s `insertedIds`/`updatedIds` bookkeeping, see
+ * `WFSTFeatureLocksStorage`) back into a real {@link Feature}, so it can be re-templated into
+ * WFS-T XML when a lock is committed.
+ *
+ * `WFSTFeatureLockStore` stores GML instead of GeoJSON specifically when its own delegate store
+ * is GML-configured (see its `useGMLSerialization`) - GeoJSON cannot represent Circle/Arc at all,
+ * so a locked Circle/Arc edit could never survive a commit otherwise. The two formats are
+ * trivially distinguishable by their first character (GML always starts with an XML
+ * declaration/tag, JSON always with `"{"`), so detecting from content avoids threading a separate
+ * format flag through the lock item itself.
+ *
+ * @param storedFeature the serialized content, as produced by
+ *                      `WFSTFeatureLockStore.encodePendingFeature`.
+ * @param srsName       the CRS identifier to decode the geometry into.
+ * @returns the decoded feature, or null if it couldn't be decoded.
+ */
 export function decodeStoredFeature(storedFeature: string, srsName: string): Feature | null {
     const reference = getReference(srsName);
     if (storedFeature.trim().startsWith("<")) {

@@ -5,29 +5,35 @@ import {create} from "xmlbuilder2";
 import {WFSTEditFeatureLockItem} from "../types/WFSTTypes";
 import {decodeStoredFeature, verifyGeometryCompatibilityOrThrowError} from "./WFSTFeaturePreparation";
 
+/** Options shared by {@link WFSTQueries.TransactionAddRequest2_0_0}/{@link WFSTQueries.TransactionUpdateRequest2_0_0} (and their single-feature counterparts). */
 interface WFSTAddUpdateRequestOptions {
     typeName: string;
     feature: Feature;
     featureDescription: WFSFeatureDescription,
+    /** Update only, and only when true: omit the geometry `<wfs:Property>` entirely, sending property changes alone. */
     onlyProperties?: boolean;
     prettyPrint?: boolean
     invertAxes?: boolean;
     mode3D?: boolean;
 }
 
+/** Options for {@link WFSTQueries.TransactionDeleteRequest2_0_0}. */
 interface WFSTRemoveRequestOptions {
     typeName: string;
     rid: number | string;
     prettyPrint?: boolean
 }
 
+/** Options for {@link WFSTQueries.GetFeatureWithLock2_0_0}/{@link WFSTQueries.LockFeature2_0_0}. */
 interface WFSTGetFeatureWithLockOptions {
     typeName: string;
     rids: string[] | number[],
+    /** Lock duration in minutes (converted to seconds in the request); defaults to 5 minutes if omitted. */
     expiry?: number
     prettyPrint?: boolean
 }
 
+/** Options for {@link WFSTQueries.TransactionCommitLock_2_0_0}. */
 interface WFSTCommitLockTransaction {
     lockItem: WFSTEditFeatureLockItem;
     typeName: string;
@@ -37,11 +43,13 @@ interface WFSTCommitLockTransaction {
     mode3D?: boolean;
 }
 
+/** Options for {@link WFSTQueries.ReleaseLock2_0_0}. */
 interface ReleaseLockOptions {
     lockId: string;
     prettyPrint?: boolean
 }
 
+/** Options for {@link WFSTQueries.TransactionQueryByIds_2_0_0}. */
 interface TransactionQueryOptions {
     typeName: string;
     rids: string[];
@@ -49,8 +57,24 @@ interface TransactionQueryOptions {
     prettyPrint?: boolean
 }
 
+/**
+ * Builds every WFS 2.0.0 request body {@link WFSTFeatureStore} sends, as raw XML strings -
+ * `GetFeature` (by resource id), `Transaction` (Insert/Update/Delete, individually or combined
+ * for a lock commit), `GetFeatureWithLock`, `LockFeature`, and `ReleaseLock`.
+ *
+ * Geometry encoding within these requests is delegated to {@link GMLFeatureEncoder}, configured
+ * per-call against the target feature type's own schema (`featureDescription`).
+ */
 export class WFSTQueries {
 
+    /**
+     * Builds a `GetFeature` request filtered to an explicit set of resource ids (a WFS-T
+     * `GetFeature`, not a `Transaction` - used for reading features back, e.g. by
+     * {@link WFSTFeatureStore.queryByRids}).
+     *
+     * @param options the type name, ids to fetch, and optional output format override.
+     * @returns the request XML.
+     */
     public static TransactionQueryByIds_2_0_0(options: TransactionQueryOptions) {
         const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${rid}"/>`)
         const outputFormat =  options.outputFormat ? options.outputFormat : "application/gml+xml; version=3.2";
@@ -65,6 +89,14 @@ export class WFSTQueries {
     </wfs:Query>
 </wfs:GetFeature>`, options.prettyPrint)
     }
+
+    /**
+     * Builds a `Transaction` request deleting a single feature - see
+     * {@link WFSTFeatureStore.remove}.
+     *
+     * @param options the type name and id of the feature to delete.
+     * @returns the request XML.
+     */
     public static TransactionDeleteRequest2_0_0(options: WFSTRemoveRequestOptions) {
         // Sample source: https://gist.github.com/SKalt/0f4b757209687331c8a1d40aecbf69f9
         return this.prettyPrint(`<?xml version="1.0" ?>
@@ -80,6 +112,7 @@ ${this.singleDelete2_0_0(options)}
 </wfs:Transaction>`, options.prettyPrint);
     }
 
+    /** @returns just the inner `<wfs:Delete>` fragment for one feature - shared by {@link TransactionDeleteRequest2_0_0} and {@link TransactionCommitLock_2_0_0}'s batch of deletes. */
     private static singleDelete2_0_0(options: WFSTRemoveRequestOptions) {
         return `<wfs:Delete typeName="${options.typeName}">
       <fes:Filter>
@@ -88,6 +121,13 @@ ${this.singleDelete2_0_0(options)}
    </wfs:Delete>`;
     }
 
+    /**
+     * Builds a `Transaction` request inserting a single feature - see
+     * {@link WFSTFeatureStore.add}.
+     *
+     * @param options the feature to insert, its type's schema, and encoding options.
+     * @returns the request XML.
+     */
     public static TransactionAddRequest2_0_0(options: WFSTAddUpdateRequestOptions) {
         return this.prettyPrint(`<?xml version="1.0" ?>
 <wfs:Transaction xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0" xmlns:ows="http://www.opengis.net/ows/1.1" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:gml="http://www.opengis.net/gml/3.2" service="WFS" version="2.0.0">
@@ -96,6 +136,13 @@ ${this.singleAdd2_0_0(options)}
 `, options.prettyPrint);
     }
 
+    /**
+     * @returns just the inner `<wfs:Insert>` fragment for one feature - shared by
+     *          {@link TransactionAddRequest2_0_0} and {@link TransactionCommitLock_2_0_0}'s batch
+     *          of inserts. Encodes the geometry against `options.featureDescription`'s own schema
+     *          via {@link GMLFeatureEncoder}, and throws if the feature's geometry type turns out
+     *          incompatible with the schema (see {@link verifyGeometryCompatibilityOrThrowError}).
+     */
     private static singleAdd2_0_0( options: WFSTAddUpdateRequestOptions ) {
         const properties = this.propertiesAsGMLForAdd(options.feature);
         const targetGeometry = options.featureDescription.geometry.type as GMLGeometryTypeKey;
@@ -116,6 +163,7 @@ ${this.singleAdd2_0_0(options)}
   </wfs:Insert>`;
     }
 
+    /** @returns `xmlContent` re-serialized, pretty-printed if `pretty` is true - the common post-processing step for every request builder here. */
     private static prettyPrint(xmlContent: string, pretty = false) {
             // Parse the XML string into a document
             const doc = create(xmlContent);
@@ -123,6 +171,13 @@ ${this.singleAdd2_0_0(options)}
             return doc.end({ prettyPrint: pretty });
     }
 
+    /**
+     * Builds a `Transaction` request updating a single feature (geometry and/or properties) -
+     * see {@link WFSTFeatureStore.put}/{@link WFSTFeatureStore.putProperties}.
+     *
+     * @param options the feature's new state, its type's schema, and encoding options.
+     * @returns the request XML.
+     */
     public static TransactionUpdateRequest2_0_0(options: WFSTAddUpdateRequestOptions) {
         return this.prettyPrint(`<?xml version="1.0" ?>
 <wfs:Transaction
@@ -138,6 +193,13 @@ ${this.singleUpdate2_0_0(options)}
 </wfs:Transaction>`, options.prettyPrint)
     }
 
+    /**
+     * @returns just the inner `<wfs:Update>` fragment for one feature - shared by
+     *          {@link TransactionUpdateRequest2_0_0} and {@link TransactionCommitLock_2_0_0}'s
+     *          batch of updates. Omits the geometry property entirely when
+     *          `options.onlyProperties` is true; otherwise encodes and validates it the same way
+     *          {@link singleAdd2_0_0} does.
+     */
     private static singleUpdate2_0_0(options: WFSTAddUpdateRequestOptions) {
         const properties = this.propertiesAsGMLForUpdate(options.feature);
         let geometryContent : string;
@@ -166,6 +228,7 @@ ${this.singleUpdate2_0_0(options)}
    </wfs:Update>`;
     }
 
+    /** @returns `feature.properties` as a series of `<wfs:Property>` elements, for an Update request. */
     private static propertiesAsGMLForUpdate(feature: Feature, inPrefix?: string) {
         const prefix = inPrefix ? inPrefix : "wfs";
         let properties = "";
@@ -183,6 +246,7 @@ ${this.singleUpdate2_0_0(options)}
         return properties;
     }
 
+    /** @returns `feature.properties` as a series of `<tns:propertyName>value</tns:propertyName>` elements, for an Insert request (a different shape than {@link propertiesAsGMLForUpdate}'s `<wfs:Property>` wrapper, per the WFS-T spec). */
     private static propertiesAsGMLForAdd(feature: Feature, inPrefix?: string) {
         const prefix = inPrefix ? inPrefix : "tns";
         let properties = "";
@@ -196,6 +260,16 @@ ${this.singleUpdate2_0_0(options)}
     }
 
 
+    /**
+     * Builds a single combined `Transaction` request committing every pending edit in a lock
+     * (inserts, updates, deletes) at once - see {@link WFSTFeatureStore.commitLockTransaction}.
+     * Pending features are stored serialized (see
+     * {@link WFSTFeatureLockStore.encodePendingFeature}) and decoded back via
+     * {@link decodeStoredFeature} before being encoded into this request.
+     *
+     * @param options the lock's accumulated edits, the type's schema, and encoding options.
+     * @returns the request XML, carrying the lock's `lockId` so the server can validate it.
+     */
     public static TransactionCommitLock_2_0_0(options: WFSTCommitLockTransaction ) {
         const deletedItems = options.lockItem.deletedIds.map(element=> this.singleDelete2_0_0(
             {
@@ -239,6 +313,13 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
 </wfs:Transaction>`, options.prettyPrint)
     }
 
+    /**
+     * Builds a `GetFeatureWithLock` request - locks the given features and returns them in one
+     * response - see {@link WFSTFeatureStore.getFeatureWithLock}.
+     *
+     * @param options the type name, ids to lock, and lock expiry.
+     * @returns the request XML.
+     */
     public static GetFeatureWithLock2_0_0(options: WFSTGetFeatureWithLockOptions ) {
         const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${rid}"/>`);
         // Expiry is in seconds, 300 = 5 minutes. Our options.expiry is in minutes, therefor we multiply * 60
@@ -264,6 +345,14 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
 </wfs:GetFeatureWithLock>`, options.prettyPrint);
     }
 
+    /**
+     * Builds a `ReleaseLock` request - releases a previously-acquired lock without committing or
+     * discarding its edits server-side (the pending edits still live client-side until the lock
+     * store is discarded).
+     *
+     * @param options the lock id to release.
+     * @returns the request XML.
+     */
     public static ReleaseLock2_0_0(options: ReleaseLockOptions) {
         return this.prettyPrint(`<wfs:ReleaseLock
     service="WFS"
@@ -273,6 +362,13 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
 </wfs:ReleaseLock>`, options.prettyPrint);
     }
 
+    /**
+     * Builds a `LockFeature` request - like {@link GetFeatureWithLock2_0_0}, but locks the
+     * features without fetching their data - see {@link WFSTFeatureStore.lockFeatures}.
+     *
+     * @param options the type name, ids to lock, and lock expiry.
+     * @returns the request XML.
+     */
     static LockFeature2_0_0(options: WFSTGetFeatureWithLockOptions ) {
         const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${rid}"/>`);
         // Expiry is in seconds, 300 = 5 minutes. Our options.expiry is in minutes, therefor we multiply * 60

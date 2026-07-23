@@ -15,6 +15,7 @@ import {tryBuildCircularGeometryJSON} from "./encodeCircularShapeToJSON";
 import {normalizeDecodedArcShape} from "./normalizeDecodedArcShape";
 import {GMLFeatureEncoder} from "../../GMLFeatureEncoder";
 
+/** Constructor options for {@link AdvancedGMLCodec}, extending RIA's own {@link GMLCodecConstructorOptions}. */
 export interface AdvancedGMLCodecConstructorOptions extends GMLCodecConstructorOptions {
     /** GML version used for encode() output only; decode() auto-detects as GMLCodec already does. @default '3.2' */
     gmlVersion?: '3.2' | '3.1.1';
@@ -30,7 +31,9 @@ export interface AdvancedGMLCodecConstructorOptions extends GMLCodecConstructorO
     mode3D?: boolean;
 }
 
+/** `encode()`'s reported content type when `gmlVersion` is `'3.2'`. */
 const DEFAULT_OUTPUT_GML_3_2 = "application/gml+xml; version=3.2";
+/** `encode()`'s reported content type when `gmlVersion` is `'3.1.1'`. */
 const DEFAULT_OUTPUT_GML_3_1_1 = "text/xml; subtype=gml/3.1.1";
 
 /**
@@ -44,16 +47,29 @@ const DEFAULT_OUTPUT_GML_3_1_1 = "text/xml; subtype=gml/3.1.1";
  * natural geometry type and makes no attempt to wrap/upgrade geometries to match a target type.
  */
 export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCodec<TFeature> {
+    /** GML version {@link encode}/{@link encodeFeature}/{@link encodeShape} write - see {@link AdvancedGMLCodecConstructorOptions.gmlVersion}. */
     private readonly gmlVersion: '3.2' | '3.1.1';
+    /** See {@link AdvancedGMLCodecConstructorOptions.usePosList}. */
     private readonly usePosListOption: boolean;
+    /** Reference identifiers whose X/Y axis order should be swapped on encode - see {@link shouldInvert}. */
     private readonly swapAxesOption?: string[];
+    /** See {@link AdvancedGMLCodecConstructorOptions.featureCollectionId}. */
     private readonly featureCollectionId?: string;
     // mode3D:true unconditionally: an internal-only intermediate representation should always
     // preserve Z faithfully. Whether the final GML actually gets written in 3D is decided later,
     // per this.mode3D, at the point of GML serialization.
+    /**
+     * Used only as an intermediate step (see {@link toGMLFeatureJSON}/{@link encodeShape}) to get
+     * a feature/shape into GeoJSON-shaped geometry before final GML serialization -
+     * `mode3D: true` unconditionally, since this internal representation should always preserve Z
+     * faithfully; whether the *final* GML is actually written in 3D is decided later, per
+     * {@link mode3D}, at the point of GML serialization.
+     */
     private readonly shapeCodec = new GeoJsonCodec({mode3D: true});
+    /** See {@link AdvancedGMLCodecConstructorOptions.mode3D}. */
     private readonly mode3D?: boolean;
 
+    /** @param options see {@link AdvancedGMLCodecConstructorOptions}; also passed through to the inherited {@link GMLCodec} constructor. */
     constructor(options?: AdvancedGMLCodecConstructorOptions) {
         super(options);
         this.gmlVersion = options?.gmlVersion ?? '3.2';
@@ -67,11 +83,16 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         this.mode3D = options?.mode3D;
     }
 
-    // Decoding itself is still entirely delegated to GMLCodec.decode - only the resulting shapes
-    // are post-processed here, to swap RIA's own decoded elliptical Arc (a === b) for the
-    // structurally-circular CircularArcByCenterPoint. See normalizeDecodedArcShape.ts for why this
-    // matters: without it, a shape drawn/saved as CircularArcByCenterPoint comes back from the
-    // server as a plain Arc, editable into an ellipse by RIA's default editor.
+    /**
+     * Decoding itself is still entirely delegated to {@link GMLCodec.decode} - only the resulting
+     * shapes are post-processed here, to swap RIA's own decoded elliptical Arc (`a === b`) for
+     * the structurally-circular `CircularArcByCenterPoint`. See {@link normalizeDecodedArcShape}
+     * for why this matters: without it, a shape drawn/saved as `CircularArcByCenterPoint` comes
+     * back from the server as a plain Arc, editable into an ellipse by RIA's default editor.
+     *
+     * @param options passed through to {@link GMLCodec.decode} unchanged.
+     * @returns a cursor over the decoded features, with every shape normalized.
+     */
     decode(options: CodecDecodeOptions): Cursor<TFeature> {
         const cursor = super.decode(options);
         return {
@@ -86,6 +107,13 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         };
     }
 
+    /**
+     * Encodes every feature in `featureCursor` into a single `<gml:FeatureCollection>` document -
+     * the multi-feature counterpart to {@link encodeFeature}.
+     *
+     * @param featureCursor the features to encode.
+     * @returns the encoded XML content and its content type (per {@link gmlVersion}).
+     */
     encode(featureCursor: Cursor<TFeature>): EncodeResult {
         const xmlns = this.gmlVersion === '3.1.1' ? 'http://www.opengis.net/gml' : 'http://www.opengis.net/gml/3.2';
         const doc = create({version: '1.0', encoding: 'UTF-8'});
@@ -140,6 +168,17 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         });
     }
 
+    /**
+     * Shared by {@link encode} and {@link encodeFeature}: builds one feature's GML representation
+     * via {@link toGMLFeatureJSON} + {@link encodeFeatureToGML}, either into an existing parent
+     * element (`inDoc`, used by {@link encode} to nest into its `<gml:FeatureCollection>`) or as a
+     * new standalone document (used by {@link encodeFeature}).
+     *
+     * @param feature the feature to encode.
+     * @param inDoc   an existing element to append into, or omitted for a standalone document.
+     * @throws {ProgrammingError} if `feature.shape` is null.
+     * @returns the encoded XML.
+     */
     private encodeFeatureInto(feature: Feature, inDoc?: XMLBuilder): string {
         if (!feature.shape) {
             throw new ProgrammingError("AdvancedGMLCodec: features without a shape are not supported");
@@ -154,6 +193,16 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         });
     }
 
+    /**
+     * Converts a feature into the intermediate {@link GMLFeature} JSON shape
+     * {@link encodeFeatureToGML} consumes - Circle/Arc go through
+     * {@link tryBuildCircularGeometryJSON} directly (GeoJSON can't represent them), everything
+     * else via {@link GMLFeatureEncoder.encodeFeatureToGeoJSON}.
+     *
+     * @param feature the feature to convert (must have a non-null `shape` - guaranteed by
+     *                {@link encodeFeatureInto}, the only caller).
+     * @returns the intermediate JSON representation.
+     */
     private toGMLFeatureJSON(feature: Feature): GMLFeature {
         // feature.shape is guaranteed non-null here - encodeFeatureInto (the only caller) already
         // throws on a shapeless feature before reaching this method.
@@ -176,10 +225,12 @@ export class AdvancedGMLCodec<TFeature extends Feature = Feature> extends GMLCod
         return featureAsJson;
     }
 
+    /** @returns true if `referenceIdentifier` is listed in {@link swapAxesOption} (i.e. this reference's X/Y axis order should be swapped on encode), else undefined. */
     private shouldInvert(referenceIdentifier: string): boolean | undefined {
         return this.swapAxesOption?.includes(referenceIdentifier);
     }
 
+    /** @returns a probably-unique id of the form `"<prefix>-<random>"`, used for auto-generated `gml:id` values (e.g. {@link encode}'s `FeatureCollection`, {@link encodeShape}'s standalone geometry). */
     private static generateId(prefix: string): string {
         return `${prefix}-${Math.random().toString(36).slice(2)}`;
     }
