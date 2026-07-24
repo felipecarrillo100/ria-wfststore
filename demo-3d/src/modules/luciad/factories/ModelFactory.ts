@@ -1,13 +1,16 @@
 import { WFSFeatureStore } from '@luciad/ria/model/store/WFSFeatureStore.js'
 import { FeatureModel } from '@luciad/ria/model/feature/FeatureModel.js'
-import { WFSTFeatureStore } from 'ria-wfststore'
+import { WFSTFeatureStore, AdvancedGMLCodec } from 'ria-wfststore'
 import {type CreateOGC3DTilesModelOptions, OGC3DTilesModel} from "@luciad/ria/model/tileset/OGC3DTilesModel.js";
 import {getReference} from "@luciad/ria/reference/ReferenceProvider.js";
 
 export class ModelFactory {
   static async createWfsModel(serviceUrl: string, typeName: string, wfst = false): Promise<FeatureModel> {
     const store = wfst
-      ? await WFSTFeatureStore.createFromURL_WFST(serviceUrl, typeName)
+      ? await WFSTFeatureStore.createFromURL_WFST(serviceUrl, typeName, {
+          codec: new AdvancedGMLCodec({ mode3D: true }),
+          outputFormat: 'application/gml+xml; version=3.2',
+        })
       : await WFSFeatureStore.createFromURL(serviceUrl, typeName)
     return new FeatureModel(store)
   }

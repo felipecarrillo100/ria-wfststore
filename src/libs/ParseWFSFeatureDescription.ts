@@ -325,6 +325,39 @@ export function standardizeProperties(featureTemplate: WFSFeatureDescription, fe
     };
 }
 
+/**
+ * Filters `properties` down to only the keys `featureTemplate`'s own schema declares, coercing
+ * each to its declared JSON type (see {@link setProperVariableType}) - the single gate at the
+ * point a feature's properties are serialized for a WFS-T Insert/Update, so nothing outside what
+ * the server's own `DescribeFeatureType` advertises for this type is ever sent back to it.
+ *
+ * Unlike {@link standardizeProperties}, this never adds a schema property that's missing from
+ * `properties` (no defaulting) - it's a pure subset filter, safe to apply to a partial update
+ * (e.g. `putProperties`'s `onlyProperties: true` case) without forcing every other field to a
+ * default value.
+ *
+ * Real-world motivation: a feature decoded via RIA's own, schema-agnostic `GMLCodec.decode()`
+ * (used by {@link AdvancedGMLCodec}) picks up `gml:AbstractFeatureType`'s own structural elements
+ * (e.g. `gml:boundedBy`) as an extra `boundedBy` property, since that decoder has no notion of
+ * "this feature type's own declared properties" to exclude them by. Left unfiltered, editing that
+ * feature and sending it back would include `boundedBy` as a `<wfs:Property>` the server doesn't
+ * recognize, and reject the whole transaction.
+ *
+ * @param featureTemplate the schema to filter against.
+ * @param properties      the properties to filter.
+ * @returns a new object containing only the schema-declared keys that were actually present in
+ *          `properties`.
+ */
+export function filterPropertiesToSchema(featureTemplate: WFSFeatureDescription, properties: {[key: string]: any}): {[key: string]: any} {
+    const filtered: {[key: string]: any} = {};
+    for (const element of featureTemplate.properties) {
+        if (element.name && typeof properties[element.name] !== "undefined") {
+            filtered[element.name] = setProperVariableType(featureTemplate, properties, element.name);
+        }
+    }
+    return filtered;
+}
+
 
 
 /** @returns the JSON Schema type `xsdType` maps to via {@link xsdToJsonMap}, or `"unknown"` if it isn't recognized. */

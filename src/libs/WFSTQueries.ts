@@ -1,6 +1,6 @@
 import {Feature} from "@luciad/ria/model/feature/Feature";
 import {GMLFeatureEncoder} from "./GMLFeatureEncoder";
-import {GMLGeometryTypeKey, WFSFeatureDescription} from "./ParseWFSFeatureDescription";
+import {filterPropertiesToSchema, GMLGeometryTypeKey, WFSFeatureDescription} from "./ParseWFSFeatureDescription";
 import {create} from "xmlbuilder2";
 import {WFSTEditFeatureLockItem} from "../types/WFSTTypes";
 import {decodeStoredFeature, verifyGeometryCompatibilityOrThrowError} from "./WFSTFeaturePreparation";
@@ -144,7 +144,7 @@ ${this.singleAdd2_0_0(options)}
      *          incompatible with the schema (see {@link verifyGeometryCompatibilityOrThrowError}).
      */
     private static singleAdd2_0_0( options: WFSTAddUpdateRequestOptions ) {
-        const properties = this.propertiesAsGMLForAdd(options.feature);
+        const properties = this.propertiesAsGMLForAdd(options.feature, options.featureDescription);
         const targetGeometry = options.featureDescription.geometry.type as GMLGeometryTypeKey;
         const gmlEncoder = new GMLFeatureEncoder({targetGeometry, gmlVersion: "3.2", invert: options.invertAxes, mode3D: options.mode3D});
         const {geometry, geometryType} = gmlEncoder.encodeFeature(options.feature);
@@ -201,7 +201,7 @@ ${this.singleUpdate2_0_0(options)}
      *          {@link singleAdd2_0_0} does.
      */
     private static singleUpdate2_0_0(options: WFSTAddUpdateRequestOptions) {
-        const properties = this.propertiesAsGMLForUpdate(options.feature);
+        const properties = this.propertiesAsGMLForUpdate(options.feature, options.featureDescription);
         let geometryContent : string;
         if (options.onlyProperties) {
             geometryContent = ""
@@ -228,35 +228,49 @@ ${this.singleUpdate2_0_0(options)}
    </wfs:Update>`;
     }
 
-    /** @returns `feature.properties` as a series of `<wfs:Property>` elements, for an Update request. */
-    private static propertiesAsGMLForUpdate(feature: Feature, inPrefix?: string) {
+    /**
+     * @returns `feature.properties` as a series of `<wfs:Property>` elements, for an Update
+     *          request - filtered to `featureDescription`'s own schema first (see
+     *          {@link filterPropertiesToSchema}), so a property not declared by the server's own
+     *          `DescribeFeatureType` (e.g. `boundedBy`, injected by a schema-agnostic GML decoder)
+     *          is never sent back to it.
+     */
+    private static propertiesAsGMLForUpdate(feature: Feature, featureDescription: WFSFeatureDescription, inPrefix?: string) {
         const prefix = inPrefix ? inPrefix : "wfs";
-        let properties = "";
-        for (const key in feature.properties) {
-            if (feature.properties.hasOwnProperty(key)) {
+        const properties = filterPropertiesToSchema(featureDescription, feature.properties);
+        let result = "";
+        for (const key in properties) {
+            if (properties.hasOwnProperty(key)) {
                 const s =
 `<${prefix}:Property>
     <${prefix}:ValueReference>${key}</${prefix}:ValueReference>
-    <${prefix}:Value>${feature.properties[key]}</${prefix}:Value>
+    <${prefix}:Value>${properties[key]}</${prefix}:Value>
 </${prefix}:Property>
 `
-                properties+=s;
+                result+=s;
             }
         }
-        return properties;
+        return result;
     }
 
-    /** @returns `feature.properties` as a series of `<tns:propertyName>value</tns:propertyName>` elements, for an Insert request (a different shape than {@link propertiesAsGMLForUpdate}'s `<wfs:Property>` wrapper, per the WFS-T spec). */
-    private static propertiesAsGMLForAdd(feature: Feature, inPrefix?: string) {
+    /**
+     * @returns `feature.properties` as a series of `<tns:propertyName>value</tns:propertyName>`
+     *          elements, for an Insert request (a different shape than
+     *          {@link propertiesAsGMLForUpdate}'s `<wfs:Property>` wrapper, per the WFS-T spec) -
+     *          filtered to `featureDescription`'s own schema first, same as
+     *          {@link propertiesAsGMLForUpdate}.
+     */
+    private static propertiesAsGMLForAdd(feature: Feature, featureDescription: WFSFeatureDescription, inPrefix?: string) {
         const prefix = inPrefix ? inPrefix : "tns";
-        let properties = "";
-        for (const key in feature.properties) {
-            if (feature.properties.hasOwnProperty(key)) {
-                const s = `<${prefix}:${key}>${feature.properties[key]}</${prefix}:${key}>`
-                properties+=s;
+        const properties = filterPropertiesToSchema(featureDescription, feature.properties);
+        let result = "";
+        for (const key in properties) {
+            if (properties.hasOwnProperty(key)) {
+                const s = `<${prefix}:${key}>${properties[key]}</${prefix}:${key}>`
+                result+=s;
             }
         }
-        return properties;
+        return result;
     }
 
 

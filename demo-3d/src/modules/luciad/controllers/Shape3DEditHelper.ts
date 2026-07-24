@@ -46,7 +46,12 @@ export function create3DEditController(tool: ThreeDEditTool, layer: FeatureLayer
     if (store instanceof WFSTFeatureStore) {
       Promise.resolve(store.add(feature)).catch((err: unknown) => console.error('WFS-T add failed:', err))
     } else {
-      Promise.resolve(layer.model.put(feature)).catch((err: unknown) => console.error('put failed:', err))
+      // Not .put(): a brand-new feature has no id yet, and WFSTFeatureLockStore.put() only
+      // records a pending edit when it finds a matching existing entry by id - for a new
+      // feature it finds none, so the shape would render locally (super.put() still adds it to
+      // the in-memory store) but never get queued into insertedIds, and would be silently
+      // dropped from the eventual WFS-T commit. .add() is what actually queues it.
+      Promise.resolve(layer.model.add(feature)).catch((err: unknown) => console.error('add failed:', err))
     }
   })
 

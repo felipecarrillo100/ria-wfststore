@@ -777,6 +777,44 @@ describe('WFSTFeatureStore 3D support (live GeoServer round-trip)', () => {
         await store.remove(id);
     });
 
+    // Regression guard for a real bug found manually against a live GeoServer instance:
+    // GeoServer's *global* `numDecimals` setting (Global Settings > "Number of decimals",
+    // independent of any per-datastore setting) defaults to 4 and controls WFS/GML coordinate
+    // output precision server-wide. At this latitude, 4 decimal degrees is ~8-11m of rounding
+    // error - applied independently per vertex, not as a uniform shift. For a small,
+    // building-scale polygon (this one is ~20m across, deliberately sized and positioned to
+    // mirror the real feature that surfaced this bug), that's up to a quarter of the shape's own
+    // size jittered randomly on every vertex on read-back, even though the geometry is stored at
+    // full double precision - visually indistinguishable from the whole shape being distorted/
+    // rotated, while its overall location stays roughly correct (which is what made it look like
+    // an axis-order bug at first, and cost real time to rule that out). The fix was raising
+    // numDecimals globally on the GeoServer instance (see docker/bootstrap/bootstrap.sh) - this
+    // test exists so a future stack reset that regresses that setting fails loudly here instead
+    // of only being noticeable as "my polygon looks wrong after I reload the page."
+    it('adds a small (~20m), high-precision 3D polygon and reads back exact vertices (numDecimals regression guard)', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features_3d", {mode3D: true});
+
+        // [x, y, z] = [lon, lat, z] - matches RIA's own Point.x/.y convention (confirmed against
+        // this exact server manually: createPolygon's x always round-trips as longitude).
+        const ring = [
+            [5.371091720844599, 43.28381150950866, 202.31339831277728],
+            [5.371055442591337, 43.28379185216772, 202.30151553079486],
+            [5.371253416635665, 43.28365322000057, 202.40396245196462],
+            [5.371294711920317, 43.28367343621123, 202.2803506469354],
+        ] as any;
+        const feature = new Feature(createPolygon(reference, ring), {label: "3d-small-high-precision-polygon"}, 1);
+        const id = await store.add(feature);
+        expect(id).toBeTruthy();
+
+        const cursor = await store.queryByRids([id as string]);
+        expect(cursor.hasNext()).toBe(true);
+        // Default 1e-6 degree tolerance (~0.1m) is deliberately far tighter than the ~8-11m error
+        // a numDecimals=4 regression would produce - this fails loudly if that setting regresses.
+        expectFeaturesCloseEnough(feature, cursor.next());
+
+        await store.remove(id);
+    });
+
     // Coplanar within each polygon (flat/horizontal), but distinct heights between the two
     // polygons in the collection - more coverage than the single-polygon, single-height test
     // above, without attempting a shape LuciadRIA's own model doesn't support.

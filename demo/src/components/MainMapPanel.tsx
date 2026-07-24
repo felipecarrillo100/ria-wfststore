@@ -89,6 +89,7 @@ export function MainMapPanel() {
       EditFeaturePropertiesForm,
       {
         feature,
+        featureTemplate: store.getFeatureTemplate(),
         onSave: (properties: Record<string, unknown>) => {
           const updated = new Feature(feature.shape, properties, feature.id)
           // store is WFSTFeatureStore | WFSTFeatureLockStore - add() is async on the former,
@@ -159,13 +160,14 @@ export function MainMapPanel() {
   // Open edit-properties as a react-dockable-desktop modal
   const openEditPropsRef = useRef<((feature: any, layer: FeatureLayer) => void) | null>(null)
   openEditPropsRef.current = (feature: any, layer: FeatureLayer) => {
+    const store = (layer.model as any).store
     openModal(
       EditFeaturePropertiesForm,
       {
         feature,
+        featureTemplate: store?.getFeatureTemplate?.(),
         onSave: (properties: Record<string, unknown>) => {
           const updated = new Feature(feature.shape, properties, feature.id)
-          const store = (layer.model as any).store
           if (store instanceof WFSTFeatureStore) {
             store.putProperties(updated).catch((err: unknown) => console.error('WFS-T putProperties failed:', err))
           } else {
@@ -267,13 +269,16 @@ export function MainMapPanel() {
               const clickedObjects = ((info as any)?.objects ?? []) as Feature[]
               if (clickedObjects.length === 0) return
 
-              // Use all selected features in this layer; fall back to the clicked feature
-              // if nothing is selected. This means right-clicking any feature in a multi-selection
-              // applies bulk actions to the entire selection.
+              // Three cases: nothing selected -> act on the clicked feature; something selected
+              // but the click landed on a feature outside that selection -> still act on just
+              // the clicked feature (a stale selection elsewhere must never override what was
+              // actually right-clicked); the click landed on a feature that IS part of the
+              // current selection -> act on the whole selection (bulk actions).
               const clickedFeature = clickedObjects[0]
               const selInfo = layerMap.selectedObjects.find(s => s.layer === layer)
               const selectedInLayer = (selInfo?.selected ?? []) as Feature[]
-              const features = selectedInLayer.length > 0 ? selectedInLayer : [clickedFeature]
+              const clickedIsSelected = selectedInLayer.some(f => f.id === clickedFeature.id)
+              const features = clickedIsSelected ? selectedInLayer : [clickedFeature]
 
               const wfst = layerWfstRegistry.get(layer.id) ?? false
               populateWfsContextMenu(contextMenu, features, wfst, layerMap,
@@ -298,8 +303,12 @@ export function MainMapPanel() {
             if (clickedObjects.length === 0) return
             const feature = clickedObjects[0]
 
+            // Reuse the main context menu's item ids (not lock-specific ones) so these resolve
+            // to the same icons via WFS_CONTEXT_MENU_ICONS[item.id] in the shared
+            // onShowContextMenu translation below - these are the same semantic actions, just
+            // wired to the lock store instead of the main one.
             contextMenu.addItem({
-              id: 'lock-zoom', label: 'Zoom to feature',
+              id: 'wfs-fit', label: 'Zoom to feature',
               action: () => {
                 const bounds = feature.shape?.bounds
                 if (bounds) map.mapNavigator.fit({ bounds, animate: true })
@@ -307,15 +316,16 @@ export function MainMapPanel() {
             })
             contextMenu.addSeparator()
             contextMenu.addItem({
-              id: 'lock-edit-geom', label: 'Edit geometry',
+              id: 'wfs-edit-geom', label: 'Edit geometry',
               action: () => openEditGeomRef.current?.(feature, helperLayer),
             })
             contextMenu.addItem({
-              id: 'lock-edit-props', label: 'Edit properties',
+              id: 'wfs-edit-props', label: 'Edit properties',
               action: () => openModal(
                 EditFeaturePropertiesForm,
                 {
                   feature,
+                  featureTemplate: lockStore.getFeatureTemplate(),
                   onSave: (properties: Record<string, unknown>) => {
                     const updated = new Feature(feature.shape, properties, feature.id)
                     lockStore.putProperties(updated)
@@ -326,7 +336,7 @@ export function MainMapPanel() {
             })
             contextMenu.addSeparator()
             contextMenu.addItem({
-              id: 'lock-delete', label: 'Delete feature',
+              id: 'wfs-delete', label: 'Delete feature',
               action: () => lockStore.remove(feature.id),
             })
           }

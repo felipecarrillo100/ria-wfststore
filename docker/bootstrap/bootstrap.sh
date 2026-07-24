@@ -24,6 +24,26 @@ until [ "$(http_status "$GS_URL/rest/about/version.json")" = "200" ]; do
 done
 log "GeoServer REST API is up."
 
+# GeoServer's global numDecimals defaults to 4 - fine for coarse WMS previews, but a real
+# disaster for small, real-world-scale WFS-T features: at this latitude 4 decimal degrees is
+# ~10m of rounding error, easily larger than a building-sized shape, independently per vertex -
+# enough to visibly distort a small polygon/line on every read-back despite the geometry being
+# stored at full precision. Confirmed against the docker-demo3d stack: this exact setting was
+# the root cause of a live "committed shape looks different after reload" bug. Raised globally
+# here so every fresh reset of this disposable stack starts with it fixed, not just the one
+# persistent stack where it was first found.
+#
+# Fetch-modify-PUT-back the *whole* settings document (via jq), not a partial one: a partial
+# PUT here (confirmed the hard way) silently drops fields the response body didn't mention -
+# including `charset`, whose absence makes GeoServer's own GetCapabilities throw
+# "IllegalArgumentException: Null charset name" and take the whole WFS service down.
+log "Raising GeoServer's global numDecimals (default 4) to avoid visible coordinate rounding on small features"
+current_settings="$(curl -sf -u "$AUTH" "$GS_URL/rest/settings.json")"
+updated_settings="$(echo "$current_settings" | jq '.global.settings.numDecimals = 9')"
+curl -sf -u "$AUTH" -X PUT -H "Content-Type: application/json" \
+  -d "$updated_settings" \
+  "$GS_URL/rest/settings"
+
 if [ "$(http_status "$GS_URL/rest/workspaces/$WORKSPACE.json")" != "200" ]; then
   log "Creating workspace $WORKSPACE"
   curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" \
