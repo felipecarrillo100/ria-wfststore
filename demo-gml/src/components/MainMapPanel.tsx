@@ -30,7 +30,7 @@ import { mapCommandBus } from '../mapCommandBus'
 import { LayerBuilder, type AddWfsLayerPayload } from '../modules/luciad/factories/LayerBuilder'
 import { layerWfstRegistry } from '../modules/luciad/factories/LayerFactory'
 import { populateWfsContextMenu, WFS_CONTEXT_MENU_ICONS } from '../modules/luciad/contextmenu/FeatureContextMenu'
-import { createDrawController, getDrawToolFromController, findFirstEditableLayer } from '../modules/luciad/controllers/DrawToolsHelper'
+import { createDrawController, getDrawToolFromController, resolveTargetLayer } from '../modules/luciad/controllers/DrawToolsHelper'
 import { EditFeaturePropertiesForm } from './forms/feature/EditFeaturePropertiesForm'
 import { EditWFSTFeaturesWithLockForm } from './forms/feature/wfstlock/EditWFSTFeaturesWithLockForm'
 import { EditCurrentLockForm } from './forms/feature/wfstlock/EditCurrentLockForm'
@@ -355,8 +355,10 @@ export function MainMapPanel() {
           return
         }
         // Resolve target layer before creating the controller — onChooseLayer is synchronous
-        // and cannot show a dialog, so the "no layer" check must happen here.
-        const layer = currentLayersRef.current[panelId] ?? findFirstEditableLayer(map)
+        // and cannot show a dialog, so the "no layer" check must happen here. The cached layer
+        // must be validated, not just non-null - it can be a non-FeatureLayer if a bad value
+        // ever reaches currentLayers.
+        const layer = resolveTargetLayer(map, currentLayersRef.current[panelId] ?? null)
         if (!layer) {
           handleNoEditableLayer()
           return

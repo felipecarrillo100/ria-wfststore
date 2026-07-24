@@ -31,7 +31,7 @@ import { mapCommandBus } from '../mapCommandBus'
 import {LayerBuilder, type AddWfsLayerPayload, type Add3DTilesPayload} from '../modules/luciad/factories/LayerBuilder'
 import { layerWfstRegistry } from '../modules/luciad/factories/LayerFactory'
 import { populateWfsContextMenu, WFS_CONTEXT_MENU_ICONS } from '../modules/luciad/contextmenu/FeatureContextMenu'
-import { createDrawController, getDrawToolFromController, findFirstEditableLayer } from '../modules/luciad/controllers/DrawToolsHelper'
+import { createDrawController, getDrawToolFromController, resolveTargetLayer } from '../modules/luciad/controllers/DrawToolsHelper'
 import { create3DEditController, edit3DGeometryController, getShape3DEditToolFromController, isEdit3DGeometrySupported, type ThreeDEditTool } from '../modules/luciad/controllers/Shape3DEditHelper'
 import { EditFeaturePropertiesForm } from './forms/feature/EditFeaturePropertiesForm'
 import { EditWFSTFeaturesWithLockForm } from './forms/feature/wfstlock/EditWFSTFeaturesWithLockForm'
@@ -387,8 +387,10 @@ export function MainMapPanel() {
           return
         }
         // Resolve target layer before creating the controller — onChooseLayer is synchronous
-        // and cannot show a dialog, so the "no layer" check must happen here.
-        const layer = currentLayersRef.current[panelId] ?? findFirstEditableLayer(map)
+        // and cannot show a dialog, so the "no layer" check must happen here. The cached layer
+        // must be validated, not just non-null - it can be a non-FeatureLayer (e.g. 3D tiles)
+        // if a bad value ever reaches currentLayers.
+        const layer = resolveTargetLayer(map, currentLayersRef.current[panelId] ?? null)
         if (!layer) {
           handleNoEditableLayer()
           return
@@ -399,7 +401,7 @@ export function MainMapPanel() {
       if (cmd.type === 'SET_3D_EDIT_TOOL') {
         const { tool, panelId: targetId } = cmd.payload as { tool: ThreeDEditTool; panelId: string }
         if (targetId !== panelId) return
-        const layer = currentLayersRef.current[panelId] ?? findFirstEditableLayer(map)
+        const layer = resolveTargetLayer(map, currentLayersRef.current[panelId] ?? null)
         if (!layer) {
           handleNoEditableLayer()
           return

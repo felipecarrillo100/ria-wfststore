@@ -75,3 +75,11 @@ export function findFirstEditableLayer(map: RIAMap): FeatureLayer | null {
   }
   return walk(map.layerTree)
 }
+
+// A cached "current layer" can be stale-typed (e.g. a non-FeatureLayer node cast to FeatureLayer
+// at selection time) - instanceof checks the real runtime prototype chain, so it can't be fooled
+// by that cast. Falls back to the tree walk when the cached value isn't actually a FeatureLayer.
+export function resolveTargetLayer(map: RIAMap, cachedLayer: FeatureLayer | null): FeatureLayer | null {
+  if (cachedLayer instanceof FeatureLayer) return cachedLayer
+  return findFirstEditableLayer(map)
+}

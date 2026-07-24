@@ -23,6 +23,8 @@ import { FeatureLayer } from '@luciad/ria/view/feature/FeatureLayer.js'
 import { useLuciadMapContext } from '../context/LuciadMapContext'
 import { getLayerType } from './layerType'
 import { LayerTypeIcon } from './LayerTypeIcons'
+import FitScreenIcon from "@mui/icons-material/FitScreen";
+import {fitMapToLayer} from "../modules/luciad/utils/LayerUtils.ts";
 
 interface MapLayersComponentProps {
   map: RIAMap | undefined
@@ -87,10 +89,24 @@ function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer }: L
     if (isGroup) setExpanded(x => !x)
   }
 
+  const handleDoubleClick = (e: MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    fitMapToLayer(map, node);
+  }
+
   const handleMenuClick = (e: MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const items: ContextMenuItem[] = [
+      {
+        label: 'Fit to layer',
+        icon: <FitScreenIcon fontSize="small" />,
+        action: () => fitMapToLayer(map, node),
+      },
+      {
+        separator: true,
+      },
       {
         label: 'Delete layer',
         icon: <DeleteIcon fontSize="small" />,
@@ -171,6 +187,7 @@ function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer }: L
         disableGutters
         draggable
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={handleMenuClick}
         onDragStart={onDragStart}
         onDragOver={onDragOver}
@@ -304,8 +321,8 @@ export function MapLayersComponent({ map, panelId }: MapLayersComponentProps) {
   }, [showContextMenu])
 
   const handleSelectLayer = useCallback((node: LayerTreeNode) => {
-    if (node.treeNodeType !== LayerTreeNodeType.LAYER_GROUP) {
-      setCurrentLayer(panelId, node as FeatureLayer)
+    if (node instanceof FeatureLayer) {
+      setCurrentLayer(panelId, node)
     }
   }, [panelId, setCurrentLayer])
 
