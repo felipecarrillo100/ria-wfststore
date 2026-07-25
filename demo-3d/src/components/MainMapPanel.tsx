@@ -408,6 +408,12 @@ export function MainMapPanel() {
         }
         map.controller = create3DEditController(tool, layer)
       }
+      if (cmd.type === 'ZOOM_TO_FEATURE') {
+        const { panelId: targetId, feature } = cmd.payload as { panelId: string; feature: Feature }
+        if (targetId !== panelId) return
+        const bounds = feature.shape?.bounds
+        if (bounds) map.mapNavigator.fit({ bounds, animate: true })
+      }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

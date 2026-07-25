@@ -63,17 +63,30 @@ publish_featuretype() {
   local name="$1"
   local title="$2"
   local srs="${3:-EPSG:4326}"
+  # Optional "minx,miny,maxx,maxy" in EPSG:4326. Without this, GeoServer computes the bbox once
+  # from whatever rows exist in the table at publish time (nothing, on a fresh table) and never
+  # recalculates it as WFS-T edits happen afterward - so an empty-table default sticks around
+  # forever unless a real bbox is supplied up front here.
+  local bbox="${4:-}"
   if [ "$(http_status "$GS_URL/rest/workspaces/$WORKSPACE/datastores/$DATASTORE/featuretypes/$name.json")" != "200" ]; then
     log "Publishing featuretype $name ($srs)"
+    local bbox_json=""
+    if [ -n "$bbox" ]; then
+      IFS=',' read -r minx miny maxx maxy <<< "$bbox"
+      bbox_json=",\"nativeBoundingBox\":{\"minx\":$minx,\"miny\":$miny,\"maxx\":$maxx,\"maxy\":$maxy,\"crs\":\"EPSG:4326\"},\"latLonBoundingBox\":{\"minx\":$minx,\"miny\":$miny,\"maxx\":$maxx,\"maxy\":$maxy,\"crs\":\"EPSG:4326\"}"
+    fi
     curl -sf -u "$AUTH" -X POST -H "Content-Type: application/json" \
-      -d "{\"featureType\":{\"name\":\"$name\",\"nativeName\":\"$name\",\"title\":\"$title\",\"srs\":\"$srs\",\"enabled\":true}}" \
+      -d "{\"featureType\":{\"name\":\"$name\",\"nativeName\":\"$name\",\"title\":\"$title\",\"srs\":\"$srs\",\"enabled\":true$bbox_json}}" \
       "$GS_URL/rest/workspaces/$WORKSPACE/datastores/$DATASTORE/featuretypes"
   else
     log "Featuretype $name already published"
   fi
 }
 
-publish_featuretype "edit3d_features" "ria-3d-shape-editor persistent demo layer"
+# Bbox centered on the Marseille, France test area (padded ~1.5km around the actual test data
+# extent) - test focus for this layer, set explicitly since GeoServer would otherwise default to
+# an empty-table bbox on first publish and never correct it on its own.
+publish_featuretype "edit3d_features" "ria-3d-shape-editor persistent demo layer" "EPSG:4326" "5.3603,43.273682,5.381318,43.29409"
 publish_featuretype "edit3d_features_4979" "EPSG:4979 true-3D test layer" "EPSG:4979"
 
 log "Granting anonymous write access to $WORKSPACE layers (default GeoServer ACL restricts writes to admin roles)"
