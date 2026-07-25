@@ -24,7 +24,9 @@ import { useLuciadMapContext } from '../context/LuciadMapContext'
 import { getLayerType } from './layerType'
 import { LayerTypeIcon } from './LayerTypeIcons'
 import FitScreenIcon from "@mui/icons-material/FitScreen";
+import ViewListIcon from "@mui/icons-material/ViewList";
 import {fitMapToLayer} from "../modules/luciad/utils/LayerUtils.ts";
+import {registerFeatureListTarget} from "../featureListRegistry";
 
 interface MapLayersComponentProps {
   map: RIAMap | undefined
@@ -69,9 +71,10 @@ interface LayerRowProps {
   currentLayerId: string | null
   onMenu: (e: MouseEvent, items: ContextMenuItem[]) => void
   onSelectLayer: (node: LayerTreeNode) => void
+  onViewFeatureList: (layer: FeatureLayer) => void
 }
 
-function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer }: LayerRowProps) {
+function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer, onViewFeatureList }: LayerRowProps) {
   const visible = useNodeVisibility(node)
   const isGroup = node.treeNodeType === LayerTreeNodeType.LAYER_GROUP
   const layerType = getLayerType(node)
@@ -119,6 +122,15 @@ function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer }: L
           if (node instanceof FeatureLayer) {
             node.loadingStrategy.queryProvider.invalidate();
             node.painter?.invalidateAll();
+          }
+        },
+      },
+      {
+        label: 'View features as list',
+        icon: <ViewListIcon fontSize="small" />,
+        action: () => {
+          if (node instanceof FeatureLayer) {
+            onViewFeatureList(node)
           }
         },
       },
@@ -304,6 +316,7 @@ function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer }: L
           currentLayerId={currentLayerId}
           onMenu={onMenu}
           onSelectLayer={onSelectLayer}
+          onViewFeatureList={onViewFeatureList}
         />
       ))}
     </>
@@ -312,13 +325,27 @@ function LayerRow({ node, depth, map, currentLayerId, onMenu, onSelectLayer }: L
 
 export function MapLayersComponent({ map, panelId }: MapLayersComponentProps) {
   useLayerTreeVersion(map)
-  const { showContextMenu } = useWindowManagerActions()
+  const { showContextMenu, openPanel } = useWindowManagerActions()
   const { currentLayers, setCurrentLayer } = useLuciadMapContext()
   const currentLayer = currentLayers[panelId] ?? null
 
   const openMenu = useCallback((e: MouseEvent, items: ContextMenuItem[]) => {
     showContextMenu?.({ x: e.clientX, y: e.clientY, items })
   }, [showContextMenu])
+
+  // A real dockable/floating panel (like 'ria-map'). openPanel() takes a registered component
+  // type, not a component instance, so the target layer travels via featureListRegistry instead
+  // of a prop; one panel per layer id, keyed so reopening the same layer's list focuses the
+  // existing panel instead of duplicating it.
+  const handleViewFeatureList = useCallback((layer: FeatureLayer) => {
+    const id = `feature-list-${layer.id}`
+    registerFeatureListTarget(id, { layer, mapPanelId: panelId })
+    openPanel(id, 'feature-list', {
+      title: `Features - ${layer.label}`,
+      initialTarget: 'floating',
+      anchor: 'top-right',
+    })
+  }, [openPanel, panelId])
 
   const handleSelectLayer = useCallback((node: LayerTreeNode) => {
     if (node instanceof FeatureLayer) {
@@ -357,6 +384,7 @@ export function MapLayersComponent({ map, panelId }: MapLayersComponentProps) {
             currentLayerId={currentLayer?.id ?? null}
             onMenu={openMenu}
             onSelectLayer={handleSelectLayer}
+            onViewFeatureList={handleViewFeatureList}
           />
         ))}
       </List>

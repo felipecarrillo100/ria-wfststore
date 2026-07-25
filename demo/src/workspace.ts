@@ -1,5 +1,6 @@
 import { WorkspaceClient } from 'react-dockable-desktop'
 import { MainMapPanel } from './components/MainMapPanel'
+import { FeatureListDockablePanel } from './components/FeatureListDockablePanel'
 
 const baseMapOptions = {
   initialTarget: 'docked' as const,
@@ -15,6 +16,10 @@ export const workspace = new WorkspaceClient({
     'ria-map': {
       component: MainMapPanel,
       defaultOptions: { ...baseMapOptions, title: 'Map', canDrag: true, canMinimize: true, canClose: true },
+    },
+    'feature-list': {
+      component: FeatureListDockablePanel,
+      defaultOptions: { title: 'Features', canDrag: true, canMinimize: true, canClose: true },
     },
   },
 })
