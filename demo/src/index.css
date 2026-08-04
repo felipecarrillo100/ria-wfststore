@@ -14,29 +14,29 @@ body,
   overflow: hidden;
 }
 
-/* react-dockable-desktop v2-side-panel uses hardcoded dark colors instead of CSS vars.
+/* react-dockable-desktop rdd-side-panel uses hardcoded dark colors instead of CSS vars.
    Override here so the panel responds to the data-color-scheme attribute on <html>. */
-[data-color-scheme="light"] .v2-side-panel {
+[data-color-scheme="light"] .rdd-side-panel {
   background: rgba(248, 249, 250, 0.95);
   border-right-color: rgba(0, 0, 0, 0.08);
   box-shadow: 10px 0 30px rgba(0, 0, 0, 0.1);
 }
 
-[data-color-scheme="light"] .v2-side-panel-right {
+[data-color-scheme="light"] .rdd-side-panel-right {
   border-left-color: rgba(0, 0, 0, 0.08);
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.1);
 }
 
-[data-color-scheme="light"] .v2-side-panel-header {
+[data-color-scheme="light"] .rdd-side-panel-header {
   background-color: rgba(255, 255, 255, 0.6);
   border-bottom-color: rgba(0, 0, 0, 0.06);
 }
 
-[data-color-scheme="light"] .v2-side-panel-close-button {
-  color: var(--text-secondary);
+[data-color-scheme="light"] .rdd-side-panel-close-button {
+  color: var(--rdd-text-secondary);
 }
 
-[data-color-scheme="light"] .v2-side-panel-close-button:hover {
+[data-color-scheme="light"] .rdd-side-panel-close-button:hover {
   background-color: rgba(0, 0, 0, 0.06);
   color: #212529;
 }

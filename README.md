@@ -164,6 +164,14 @@ npm run dev
 ```
 (substitute `demo-gml` or `demo-3d` for the other variants)
 
+`demo` and `demo-gml` point at the same disposable [`docker/`](docker/README.md) test stack used
+by the automated tests. `demo-3d` instead points at
+[`docker-demo3d/`](docker-demo3d/README.md) — a separate, persistent PostGIS + GeoServer stack
+kept independent from the test stack so resetting one never affects the other:
+```
+docker compose -f docker-demo3d/docker-compose.yml up -d
+```
+
 ## Development
 
 ### Build
