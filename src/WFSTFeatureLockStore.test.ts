@@ -7,6 +7,7 @@ import {AdvancedGMLCodec} from "./libs/gml/gml32/AdvancedGMLCodec";
 import {createCircularArcByCenterPoint, createPoint} from "@luciad/ria/shape/ShapeFactory";
 import {ShapeType} from "@luciad/ria/shape/ShapeType";
 import {Feature} from "@luciad/ria/model/feature/Feature";
+import {identifiers} from "@luciad/ria/ogc/filter/FilterFactory";
 
 // Mirrors the exact pipeline MainMapPanel.tsx -> EditWFSTFeaturesWithLockForm.tsx ->
 // EditCurrentLockForm.tsx drives: acquire a lock via WFSTFeatureStore.getFeatureWithLock,
@@ -150,6 +151,29 @@ describe('WFSTFeatureLockStore (demo call-shape parity)', () => {
 
         const trackedEntry = (lockStore as any).options.insertedIds.find((e: any) => e.id === id);
         expect(JSON.parse(trackedEntry.feature).properties.label).toBe("edited");
+
+        await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
+    });
+
+    it('a geometry edit followed by a properties edit (with a stale shape) commits both', async () => {
+        const {store, id, storageId, retrieved} = await acquireLock("geom-then-props");
+        const lockStore = new WFSTFeatureLockStore(retrieved);
+        await waitFor(() => (lockStore as any).query().hasNext() && !!lockStore.getFeatureTemplate());
+        const reference = lockStore.getReference();
+
+        lockStore.put(new Feature(createPoint(reference, [7, 7]), {label: "geom-then-props"}, id));
+        // Same shape the demos pass: the one captured before the geometry edit.
+        lockStore.putProperties(new Feature(createPoint(reference, [6, 6]), {label: "geom-then-props-renamed"}, id));
+
+        const latest = await WFSTFeatureLocksStorage.getLock(storageId);
+        expect(latest.updatedIds[0].onlyProperties).toBe(false);
+        const result = await lockStore.commitLockTransaction(latest);
+        expect(result.totalUpdated).toBe(1);
+
+        const cursor = await store.query({filter: identifiers([id])});
+        const committed = cursor.next();
+        expect([(committed.shape as any).x, (committed.shape as any).y]).toEqual([7, 7]);
+        expect(committed.properties.label).toBe("geom-then-props-renamed");
 
         await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
     });

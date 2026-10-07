@@ -103,10 +103,16 @@ export class WFSTFeatureLockStore extends MemoryStore {
         return super.remove(id);
     }
 
-    /** Like {@link put}, but marks the pending edit as properties-only (`onlyProperties: true`) if it's also otherwise unchanged. */
+    /**
+     * Like {@link put}, but only `feature`'s properties are taken: the geometry is kept from this
+     * store's working copy, so a caller passing a stale shape (e.g. one captured before an earlier
+     * geometry edit) can't revert it. Marks the pending edit as properties-only
+     * (`onlyProperties: true`) only if no earlier edit of the same feature changed its geometry.
+     */
     putProperties(feature: Feature): FeatureId {
-        const options = {onlyProperties: true}
-        return this.put(feature, options);
+        const current = super.get(feature.id) as Feature | undefined;
+        const merged = new Feature(current ? current.shape : feature.shape, feature.properties, feature.id);
+        return this.put(merged, {onlyProperties: true});
     }
 
     /**
@@ -136,16 +142,17 @@ export class WFSTFeatureLockStore extends MemoryStore {
         const insertedIndex = this.options.insertedIds.findIndex(e=>e.id===id);
 
         const content = this.encodePendingFeature(feature);
-        const newFeature= {id, feature: content, onlyProperties: true};
+        const onlyProperties = !!(options && (options as any).onlyProperties);
+        const newFeature= {id, feature: content, onlyProperties};
 
-        const onlyProperties = options ? (options as any).onlyProperties : false;
         // Modify the lists
         if (unchangedIndex > -1) {
             this.options.unchangedIds.splice(unchangedIndex,1);
-            newFeature.onlyProperties = newFeature.onlyProperties && onlyProperties;
             this.options.updatedIds.push(newFeature);
         } else if (updatedIndex>-1) {
-            newFeature.onlyProperties = newFeature.onlyProperties && onlyProperties;
+            // Stays properties-only only if the earlier pending edit was too - otherwise a
+            // properties edit after a geometry edit would drop the geometry from the commit.
+            newFeature.onlyProperties = !!this.options.updatedIds[updatedIndex].onlyProperties && onlyProperties;
             this.options.updatedIds[updatedIndex]  = newFeature;
         } else if (insertedIndex > -1) {
             this.options.insertedIds[insertedIndex]  = newFeature;
