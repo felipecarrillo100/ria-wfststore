@@ -426,7 +426,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 run();
             } catch (error) {
                 resolve(null);
-                this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
+                this.delegateScreen.MessageError(`[WFS-T] Error: ${(error as Error).message}`);
             }
         };
         if (this.featureTemplate) {
