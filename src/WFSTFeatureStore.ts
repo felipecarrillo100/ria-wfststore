@@ -684,7 +684,8 @@ export class WFSTFeatureStore extends WFSFeatureStore {
         headers.Accept = (Accept && options.headers.Accept) ? Accept+";" + options.headers.Accept : options.headers.Accept;
         return {
             method: options.method,
-            credentials: this.options?.credentials ? "same-origin" : "omit",
+            // Same mapping RIA's own requests use for this option.
+            credentials: this.options?.credentials ? "include" : "same-origin",
             headers,
             body: options.method === "POST" || options.method === "PUT"  || options.method === "PATCH" ? options.body : undefined
         }

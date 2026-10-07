@@ -926,6 +926,20 @@ describe('WFSTFeatureStore swapAxes (invertAxes) handling', () => {
     });
 });
 
+describe('WFSTFeatureStore credentials option', () => {
+    for (const [credentials, expected] of [[true, "include"], [false, "same-origin"]] as const) {
+        it(`credentials: ${credentials} sends fetch credentials "${expected}", like RIA's own requests`, async () => {
+            const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features", {credentials});
+            const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+            await store.loadFeatureDescription();
+
+            expect((fetchSpy.mock.calls[0][1] as RequestInit).credentials).toBe(expected);
+            fetchSpy.mockRestore();
+        });
+    }
+});
+
 describe('WFSTFeatureStore XML escaping (live GeoServer round-trip)', () => {
     it('a label with markup characters round-trips unchanged through add() + get()', async () => {
         const {store, reference} = await CreateGeoserverStore("wfst_test:test_features");
