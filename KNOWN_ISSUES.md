@@ -22,6 +22,16 @@ Some WFS-T servers accept a Circle/Arc `Insert`/`Update` but silently degrade th
 
 On a verification failure, the row is **left in place server-side** — `add()` does not attempt to delete what it just inserted. The primary value (a loud, immediate failure signal instead of a silent, later one) comes entirely from reporting the failure and resolving `null`; the orphaned row itself is invisible to any RIA-based UI regardless (it's the geometry RIA can't decode in the first place), so cleaning it up would add real complexity (a second write, handling for *that* write potentially failing too) for comparatively little additional value. This mirrors GeoServer's own behavior for the same class of geometry, which rejects the `Insert` outright and likewise leaves nothing to clean up.
 
+## GML lock commit may swap axes when `swapAxes` is set
+
+**Status**: suspected from source reading, not yet reproduced. Deferred to be investigated together with the `CRS:84` entry below, since both come down to encode and decode using different axis-swap baselines.
+
+`WFSTFeatureLockStore.initializeDelegateStore` builds its GML codec with `swapAxes` whenever the store settings have `swapAxes` set, and `encodePendingFeature`/`decodePendingFeature` use that codec, so the local pending-edit round trip is symmetric. At commit time, though, `WFSTQueries.TransactionCommitLock_2_0_0` decodes the same pending GML through `decodeStoredFeature` (`src/libs/WFSTFeaturePreparation.ts`), which builds a fresh `AdvancedGMLCodec({reference})` *without* `swapAxes`. Then it re-encodes for the request with the store's own `invertAxes`. For a GML-configured lock with `swapAxes` set, committed geometry would therefore come out with X/Y swapped.
+
+Not affected: JSON-configured locks (GeoJSON pending edits), and any lock whose store doesn't set `swapAxes`. None of the bundled demos set it.
+
+To confirm: a live test that locks a point on a GML store with `swapAxes: true`, moves it, commits, and reads it back.
+
 ## GML axis-swap baseline is wrong specifically for a literal `CRS:84` reference
 
 **Status**: confirmed, reproducible, fix designed, not yet applied. Deferred because it does not affect the library's primary use case (see "Real-world impact" below).
