@@ -322,19 +322,55 @@ describe('WFSTFeatureStore transport error handling', () => {
         fetchSpy.mockRestore();
     });
 
-    it('loadFeatureDescription(): a network error is logged but the call site never resolves/rejects (pre-existing, unchanged)', async () => {
+    it('loadFeatureDescription(): a network error resolves null and reports via delegateScreen.MessageError', async () => {
         const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features");
+        const messageError = vi.fn();
+        class SpyScreenHelper extends WFSTDelegateScreenHelper {
+            MessageError(s: string) { messageError(s); }
+        }
+        store.setScreenHelper(new SpyScreenHelper());
         const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network down'));
 
-        let settled = false;
-        store.loadFeatureDescription().then(() => { settled = true; }, () => { settled = true; });
-        await new Promise(resolve => setTimeout(resolve, 50));
+        const result = await store.loadFeatureDescription();
 
-        expect(settled).toBe(false);
-        expect(consoleLog).toHaveBeenCalledWith('error', expect.any(Error));
+        expect(result).toBeNull();
+        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('Unknown Error'));
         fetchSpy.mockRestore();
         consoleLog.mockRestore();
+    });
+
+    // Before 0.1.1 these never settled: a missing schema made the edit callback silently skip.
+    describe('add/put/putProperties settle when DescribeFeatureType fails', () => {
+        const failures: [string, () => Promise<Response>][] = [
+            ['a 500 response', () => Promise.resolve(new Response('', {status: 500}))],
+            ['a network error', () => Promise.reject(new Error('network down'))],
+        ];
+        const operations: [string, (store: WFSTFeatureStore, feature: Feature) => Promise<unknown>][] = [
+            ['add', (store, feature) => store.add(feature)],
+            ['put', (store, feature) => store.put(feature)],
+            ['putProperties', (store, feature) => store.putProperties(feature)],
+        ];
+        for (const [failureName, failure] of failures) {
+            for (const [operationName, operation] of operations) {
+                it(`${operationName}(): ${failureName} resolves null`, async () => {
+                    const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features");
+                    store.setScreenHelper(new class extends WFSTDelegateScreenHelper { MessageError() {} }());
+                    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+                    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(failure);
+                    const feature = new Feature(createPoint(store.getReference(), [1, 1]), {label: "x"}, "test_features.1");
+
+                    const result = await Promise.race([
+                        operation(store, feature),
+                        new Promise(resolve => setTimeout(() => resolve('pending'), 3000)),
+                    ]);
+
+                    expect(result).toBeNull();
+                    fetchSpy.mockRestore();
+                    consoleLog.mockRestore();
+                });
+            }
+        }
     });
 });
 

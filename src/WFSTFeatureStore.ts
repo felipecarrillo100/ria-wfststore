@@ -249,14 +249,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                     }
                 });
             }
-            // If feature template not available then load it!
-            if (this.featureTemplate) {
-                editFeature();
-            } else {
-                this.loadFeatureDescription().then(featureTemplate=>{
-                    if (featureTemplate) editFeature();
-                })
-            }
+            this.withFeatureTemplate(resolve, editFeature);
         })
     }
      /**
@@ -320,14 +313,8 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                          }
                      });
                  }
-                 // If feature template not available then load it!
-                 if (this.featureTemplate) {
-                     editFeature();
-                 } else {
-                     this.loadFeatureDescription().then(featureTemplate=>{
-                         if (featureTemplate) editFeature();
-                     })
-                 }},
+                 this.withFeatureTemplate(resolve, editFeature);
+                 },
                  ()=> {
                      resolve(null);
                  })
@@ -418,15 +405,36 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                     onNonOk: response => this.handleOtherHttpErrors(response, resolve, () => this.delegateScreen.EditNewFeatureProperties(newFeature, this))
                 });
             }
-            // If feature template not available then load it!
-            if (this.featureTemplate) {
-                addFeature();
-            } else {
-                this.loadFeatureDescription().then(featureTemplate=>{
-                    if (featureTemplate) addFeature();
-                })
-            }
+            this.withFeatureTemplate(resolve, addFeature);
         })
+    }
+
+    /**
+     * Shared by {@link add}/{@link put}/{@link putProperties}: runs `run` once this store's
+     * feature-type schema is available, loading it first if needed (see
+     * {@link loadFeatureDescription}). If the schema can't be loaded, or `run` throws, the
+     * caller's Promise resolves null instead of being left pending - the load failure itself is
+     * already reported by the request's own error handling.
+     *
+     * @param resolve the caller's Promise resolver.
+     * @param run     the operation to perform once the schema is available.
+     */
+    private withFeatureTemplate(resolve: (value: FeatureId) => void, run: () => void) {
+        const guardedRun = () => {
+            try {
+                run();
+            } catch (error) {
+                resolve(null);
+                this.delegateScreen.MessageError(`[WFS-T] Error: ${error.message}`);
+            }
+        };
+        if (this.featureTemplate) {
+            guardedRun();
+        } else {
+            this.loadFeatureDescription().then(featureTemplate => {
+                if (featureTemplate) guardedRun(); else resolve(null);
+            });
+        }
     }
 
     /**
@@ -609,10 +617,9 @@ export class WFSTFeatureStore extends WFSFeatureStore {
      * {@link putProperties} the first time any of them runs, but callable directly to warm the
      * cache earlier.
      *
-     * @returns a Promise resolving to the parsed {@link WFSFeatureDescription}. Note: unlike every
-     *          other network call in this class, this one does not resolve on a network error -
-     *          the returned Promise is left pending in that case (a pre-existing behavior,
-     *          preserved as-is).
+     * @returns a Promise resolving to the parsed {@link WFSFeatureDescription}, or null if the
+     *          request failed (non-200 response or network error - reported via the screen
+     *          helper, like every other network call in this class).
      */
     loadFeatureDescription() {
         return new Promise<WFSFeatureDescription>((resolve) => {
@@ -622,10 +629,6 @@ export class WFSTFeatureStore extends WFSFeatureStore {
                 const featureTemplate =  parseWFSFeatureDescription(xmlText);
                 this.setFeatureTemplate(featureTemplate);
                 resolve (featureTemplate);
-            }, {
-                // Unlike every other call site, this one never resolves on a network error - the
-                // returned Promise is left pending. Preserved exactly as-is; not this slice's job to fix.
-                onNetworkError: error => {console.log('error', error)}
             });
         })
     }
