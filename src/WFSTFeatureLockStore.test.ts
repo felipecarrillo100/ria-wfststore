@@ -214,6 +214,31 @@ describe('WFSTFeatureLockStore GML branch (Circle/Arc parity with the main WFS-T
         return {storageId: lockItem.id, retrieved};
     }
 
+    it('a geometry edit followed by a properties edit (with a stale shape) commits both', async () => {
+        const {storageId, retrieved} = await acquireLockGML("gml-geom-then-props");
+        const id = retrieved.unchangedIds[0];
+        const lockStore = new WFSTFeatureLockStore(retrieved);
+        await waitFor(() => (lockStore as any).query().hasNext() && !!lockStore.getFeatureTemplate());
+        const reference = lockStore.getReference();
+
+        lockStore.put(new Feature(createPoint(reference, [7, 7]), {label: "gml-geom-then-props"}, id));
+        lockStore.putProperties(new Feature(createPoint(reference, [6, 6]), {label: "gml-geom-then-props-renamed"}, id));
+
+        const latest = await WFSTFeatureLocksStorage.getLock(storageId);
+        expect(latest.updatedIds[0].onlyProperties).toBe(false);
+        expect((await lockStore.commitLockTransaction(latest)).totalUpdated).toBe(1);
+
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features", {
+            codec: new AdvancedGMLCodec(),
+            outputFormat: "application/gml+xml; version=3.2",
+        });
+        const committed = (await store.queryByRids([id])).next();
+        expect([(committed.shape as any).x, (committed.shape as any).y]).toEqual([7, 7]);
+        expect(committed.properties.label).toBe("gml-geom-then-props-renamed");
+
+        await WFSTFeatureLocksStorage.deleteLock(storageId).catch(() => {});
+    });
+
     it('put(): editing to a CircularArcByCenterPoint does not crash, and the pending edit is GML- not GeoJSON-serialized', async () => {
         const {storageId, retrieved} = await acquireLockGML("gml-lock-put");
         const lockStore = new WFSTFeatureLockStore(retrieved);
