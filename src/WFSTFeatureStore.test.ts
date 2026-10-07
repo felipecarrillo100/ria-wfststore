@@ -408,6 +408,11 @@ describe('WFSTFeatureStore circular geometry round-trip verification', () => {
         </wfs:TransactionResponse>`;
     }
 
+    // The "verify" read-back goes through RIA's own query(), which needs a real Response.
+    function gmlResponse(xml: string) {
+        return new Response(xml, {status: 200, headers: {"Content-Type": "application/gml+xml; version=3.2"}});
+    }
+
     function updateResponseXml(rid: string) {
         return `<wfs:TransactionResponse xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0">
             <wfs:TransactionSummary><wfs:totalInserted>0</wfs:totalInserted><wfs:totalUpdated>1</wfs:totalUpdated><wfs:totalDeleted>0</wfs:totalDeleted></wfs:TransactionSummary>
@@ -423,7 +428,7 @@ describe('WFSTFeatureStore circular geometry round-trip verification', () => {
 
         const fetchSpy = vi.spyOn(globalThis, 'fetch')
             .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(insertResponseXml("test_features.500"))} as Response)
-            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(verifyResponseXml)} as Response);
+            .mockResolvedValueOnce(gmlResponse(verifyResponseXml));
 
         const feature = new Feature(shape, {label: "arc"});
         const result = await store.add(feature);
@@ -451,13 +456,13 @@ describe('WFSTFeatureStore circular geometry round-trip verification', () => {
 
         const fetchSpy = vi.spyOn(globalThis, 'fetch')
             .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(insertResponseXml("test_features.501"))} as Response)
-            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(verifyResponseXml)} as Response);
+            .mockResolvedValueOnce(gmlResponse(verifyResponseXml));
 
         const feature = new Feature(drawnShape, {label: "arc"});
         const result = await store.add(feature);
 
         expect(result).toBeNull();
-        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('Geometry round-trip verification failed'));
+        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('empty geometry collection'));
         fetchSpy.mockRestore();
     });
 
@@ -509,13 +514,13 @@ describe('WFSTFeatureStore circular geometry round-trip verification', () => {
 
         const fetchSpy = vi.spyOn(globalThis, 'fetch')
             .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(updateResponseXml("test_features.504"))} as Response)
-            .mockResolvedValueOnce({status: 200, text: () => Promise.resolve(verifyResponseXml)} as Response);
+            .mockResolvedValueOnce(gmlResponse(verifyResponseXml));
 
         const feature = new Feature(editedShape, {label: "arc"}, "test_features.504");
         const result = await store.put(feature);
 
         expect(result).toBeNull();
-        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('Geometry round-trip verification failed'));
+        expect(messageError).toHaveBeenCalledWith(expect.stringContaining('empty geometry collection'));
         fetchSpy.mockRestore();
     });
 
@@ -923,6 +928,65 @@ describe('WFSTFeatureStore swapAxes (invertAxes) handling', () => {
             swapAxes: ["EPSG:3857"]
         }));
         expect((store as any).invertAxes).toBe(false);
+    });
+});
+
+// createFromURL_WFST without a codec (demo/'s ModelFactory call). Before 0.1.1 queryByRids
+// decoded with options.codec, which is undefined here, so get()/queryByRids() resolved null.
+describe('WFSTFeatureStore queryByRids/get without an explicit codec', () => {
+    const ids = (cursor: Cursor<Feature>) => {
+        const result = [];
+        while (cursor.hasNext()) result.push(cursor.next().id);
+        return result;
+    };
+
+    it('queryByRids() returns every requested feature', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:states");
+        expect(ids(await store.queryByRids(["states.1", "states.5"]))).toEqual(["states.1", "states.5"]);
+    });
+
+    it('get() returns the feature', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:states");
+        expect((await store.get("states.1", {})).id).toBe("states.1");
+    });
+
+    it('queryByRids([]) resolves an empty cursor without a request', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:states");
+        const fetchSpy = vi.spyOn(globalThis, 'fetch');
+        expect((await store.queryByRids([])).hasNext()).toBe(false);
+        expect(fetchSpy).not.toHaveBeenCalled();
+        fetchSpy.mockRestore();
+    });
+
+    it('queryByRids() resolves null when the request fails', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:states");
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network down'));
+        expect(await store.queryByRids(["states.1"])).toBeNull();
+        fetchSpy.mockRestore();
+    });
+
+    it('add(): the Circle/Arc round-trip check works with RIA\'s auto-detected GML codec', async () => {
+        const store = await WFSTFeatureStore.createFromURL_WFST(OWS_URL, "wfst_test:test_features", {
+            outputFormat: "application/gml+xml; version=3.2",
+        });
+        await store.loadFeatureDescription();
+        const reference = store.getReference();
+        const shape = createCircularArcByCenterPoint(reference, createPoint(reference, [0, 0]), 500, 30, 200);
+        const verifyXml = new AdvancedGMLCodec().encode({
+            hasNext: (() => { let done = false; return () => !done && (done = true); })(),
+            next: () => new Feature(shape, {}, "test_features.600"),
+        } as Cursor<Feature>).content;
+        const insertXml = `<wfs:TransactionResponse xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0">
+            <wfs:TransactionSummary><wfs:totalInserted>1</wfs:totalInserted></wfs:TransactionSummary>
+            <wfs:InsertResults><wfs:Feature><fes:ResourceId rid="test_features.600"/></wfs:Feature></wfs:InsertResults>
+        </wfs:TransactionResponse>`;
+
+        const fetchSpy = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(insertXml, {status: 200}))
+            .mockResolvedValueOnce(new Response(verifyXml, {status: 200, headers: {"Content-Type": "application/gml+xml; version=3.2"}}));
+
+        expect(await store.add(new Feature(shape, {label: "arc"}))).toBe("test_features.600");
+        fetchSpy.mockRestore();
     });
 });
 

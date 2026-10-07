@@ -27,6 +27,7 @@ import {WFSCapabilitiesFeatureType} from "@luciad/ria/model/capabilities/WFSCapa
 import {createTransformation} from "@luciad/ria/transformation/TransformationFactory";
 import {WFSCapabilitiesFromUrlOptions} from "@luciad/ria/model/capabilities/WFSCapabilities";
 import {QueryOptions} from "@luciad/ria/model/store/Store";
+import {identifiers} from "@luciad/ria/ogc/filter/FilterFactory";
 import type {
     CommitLockTransactionResult,
     WFSEditedFeature,
@@ -465,27 +466,20 @@ export class WFSTFeatureStore extends WFSFeatureStore {
     }
 
     /**
-     * Fetches multiple features by id in one request (a WFS-T `GetFeature` query filtered by
-     * resource id, not a Transaction).
+     * Fetches multiple features by id in one request - a convenience over RIA's own
+     * {@link query} with an `identifiers` filter, so it decodes with the same codec RIA uses for
+     * this store (the caller's own, or RIA's auto-detected default when none was passed) and
+     * applies the same request settings (headers, credentials, version, axis order).
      *
      * @param rids the feature ids to fetch.
-     * @returns a Promise resolving to a cursor over the matched features (empty, not rejected, if
-     *          none matched or the response couldn't be decoded).
+     * @returns a Promise resolving to a cursor over the matched features (empty if none matched or
+     *          `rids` is empty), or null if the request or decoding failed.
      */
     queryByRids(rids: string[]): Promise<Cursor<Feature>> {
-        return new Promise<Cursor<Feature>>((resolve)=>{
-            const {typeName, urlEndpoint} = this.extractUtils();
-
-            const postData = WFSTQueries.TransactionQueryByIds_2_0_0({typeName, rids, outputFormat: this.options.outputFormat});
-            this.postXMLTransaction(urlEndpoint, postData, resolve, textXml => {
-                try {
-                    const cursor = this.options.codec.decode({content: textXml});
-                    resolve(cursor);
-                } catch (err) {
-                    resolve(null);
-                }
-            });
-        })
+        if (!rids || rids.length === 0) {
+            return Promise.resolve({hasNext: () => false, next: () => { throw new ProgrammingError("Cursor is empty"); }});
+        }
+        return this.query({filter: identifiers(rids)}).catch(() => null);
     }
 
     /** Reports an HTTP 401 (Unauthorized) response via the screen helper. */

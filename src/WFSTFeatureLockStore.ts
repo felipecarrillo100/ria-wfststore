@@ -295,7 +295,7 @@ export class WFSTFeatureLockStore extends MemoryStore {
         this.clear();
         WFSTFeatureLocksStorage.getLock(this.options.id).then(item=>{
             this.delegateStore.queryByRids(item.unchangedIds).then(cursor=>{
-                while (cursor.hasNext()) {
+                while (cursor && cursor.hasNext()) {
                     const feature = cursor.next();
                     super.put(feature);
                 }

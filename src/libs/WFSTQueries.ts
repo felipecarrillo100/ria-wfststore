@@ -49,14 +49,6 @@ interface ReleaseLockOptions {
     prettyPrint?: boolean
 }
 
-/** Options for {@link WFSTQueries.TransactionQueryByIds_2_0_0}. */
-interface TransactionQueryOptions {
-    typeName: string;
-    rids: string[];
-    outputFormat?: string;
-    prettyPrint?: boolean
-}
-
 /**
  * Escapes a value for use as XML text content or inside a double-quoted attribute. Every
  * caller-supplied value interpolated into the request templates below must go through this -
@@ -78,36 +70,14 @@ function escapeXml(value: unknown): string {
 
 /**
  * Builds every WFS 2.0.0 request body {@link WFSTFeatureStore} sends, as raw XML strings -
- * `GetFeature` (by resource id), `Transaction` (Insert/Update/Delete, individually or combined
- * for a lock commit), `GetFeatureWithLock`, `LockFeature`, and `ReleaseLock`.
+ * `Transaction` (Insert/Update/Delete, individually or combined for a lock commit),
+ * `GetFeatureWithLock`, `LockFeature`, and `ReleaseLock`. Plain reads by id go through RIA's own
+ * `query()` instead - see {@link WFSTFeatureStore.queryByRids}.
  *
  * Geometry encoding within these requests is delegated to {@link GMLFeatureEncoder}, configured
  * per-call against the target feature type's own schema (`featureDescription`).
  */
 export class WFSTQueries {
-
-    /**
-     * Builds a `GetFeature` request filtered to an explicit set of resource ids (a WFS-T
-     * `GetFeature`, not a `Transaction` - used for reading features back, e.g. by
-     * {@link WFSTFeatureStore.queryByRids}).
-     *
-     * @param options the type name, ids to fetch, and optional output format override.
-     * @returns the request XML.
-     */
-    public static TransactionQueryByIds_2_0_0(options: TransactionQueryOptions) {
-        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${escapeXml(rid)}"/>`)
-        const outputFormat =  options.outputFormat ? options.outputFormat : "application/gml+xml; version=3.2";
-        return this.prettyPrint(`<?xml version="1.0" encoding="UTF-8"?>
-<wfs:GetFeature xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0" xmlns:ows="http://www.opengis.net/ows/1.1" xmlns:gml="http://www.opengis.net/gml/3.2" xmlns:xlink="http://www.w3.org/1999/xlink" service="WFS" outputFormat="${outputFormat}" count="500" version="2.0.0">
-    <wfs:Query typeNames="${escapeXml(options.typeName)}">
-        <fes:Filter>         
-            <fes:Or>
-                ${allRids.join(" ")}                
-            </fes:Or>
-        </fes:Filter>
-    </wfs:Query>
-</wfs:GetFeature>`, options.prettyPrint)
-    }
 
     /**
      * Builds a `Transaction` request deleting a single feature - see
