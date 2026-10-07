@@ -890,6 +890,20 @@ describe('WFSTFeatureStore swapAxes (invertAxes) handling', () => {
     });
 });
 
+describe('WFSTFeatureStore XML escaping (live GeoServer round-trip)', () => {
+    it('a label with markup characters round-trips unchanged through add() + get()', async () => {
+        const {store, reference} = await CreateGeoserverStore("wfst_test:test_features");
+        const label = `A&B <b>x</b> "q" 'a'`;
+
+        const id = await store.add(new Feature(createPoint(reference, [1, 1]), {label}, 1));
+        expect(id).toBeTruthy();
+
+        const feature = await store.get(id as string, {});
+        expect(feature.properties.label).toBe(label);
+        await store.remove(id as string);
+    });
+});
+
 async function CreateGeoserverStore(requestedFeatureType?:string, overrides?: {mode3D?: boolean}) {
     const {wfsCapabilities, wfstCapabilities} = await WFSCapabilitiesExtended.fromURL(OWS_URL);
     const featureOperation = WFSCapabilitiesExtended.getServiceOperation(wfsCapabilities, "GetFeature");

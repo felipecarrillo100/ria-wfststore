@@ -58,6 +58,25 @@ interface TransactionQueryOptions {
 }
 
 /**
+ * Escapes a value for use as XML text content or inside a double-quoted attribute. Every
+ * caller-supplied value interpolated into the request templates below must go through this -
+ * otherwise a property value such as `A&B <b>x</b>` is either rejected or silently re-parsed into
+ * real XML elements by {@link WFSTQueries.prettyPrint}, and can inject arbitrary elements into the
+ * transaction.
+ *
+ * @param value the value to escape (converted with `String()` first).
+ * @returns the escaped string.
+ */
+function escapeXml(value: unknown): string {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+}
+
+/**
  * Builds every WFS 2.0.0 request body {@link WFSTFeatureStore} sends, as raw XML strings -
  * `GetFeature` (by resource id), `Transaction` (Insert/Update/Delete, individually or combined
  * for a lock commit), `GetFeatureWithLock`, `LockFeature`, and `ReleaseLock`.
@@ -76,11 +95,11 @@ export class WFSTQueries {
      * @returns the request XML.
      */
     public static TransactionQueryByIds_2_0_0(options: TransactionQueryOptions) {
-        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${rid}"/>`)
+        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${escapeXml(rid)}"/>`)
         const outputFormat =  options.outputFormat ? options.outputFormat : "application/gml+xml; version=3.2";
         return this.prettyPrint(`<?xml version="1.0" encoding="UTF-8"?>
 <wfs:GetFeature xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0" xmlns:ows="http://www.opengis.net/ows/1.1" xmlns:gml="http://www.opengis.net/gml/3.2" xmlns:xlink="http://www.w3.org/1999/xlink" service="WFS" outputFormat="${outputFormat}" count="500" version="2.0.0">
-    <wfs:Query typeNames="${options.typeName}">
+    <wfs:Query typeNames="${escapeXml(options.typeName)}">
         <fes:Filter>         
             <fes:Or>
                 ${allRids.join(" ")}                
@@ -114,9 +133,9 @@ ${this.singleDelete2_0_0(options)}
 
     /** @returns just the inner `<wfs:Delete>` fragment for one feature - shared by {@link TransactionDeleteRequest2_0_0} and {@link TransactionCommitLock_2_0_0}'s batch of deletes. */
     private static singleDelete2_0_0(options: WFSTRemoveRequestOptions) {
-        return `<wfs:Delete typeName="${options.typeName}">
+        return `<wfs:Delete typeName="${escapeXml(options.typeName)}">
       <fes:Filter>
-         <fes:ResourceId rid="${options.rid}"/>
+         <fes:ResourceId rid="${escapeXml(options.rid)}"/>
       </fes:Filter>
    </wfs:Delete>`;
     }
@@ -154,7 +173,7 @@ ${this.singleAdd2_0_0(options)}
         const tns = options.featureDescription.tns ? options.featureDescription.tns : (split.length > 1 ? split[0] : null);
         const geometryName = options.featureDescription.geometry.name;
         return `<wfs:Insert handle="AddHandle">
-    <tns:${typeNameMin}  ${tns ? `xmlns:tns="${tns}"` : ''}>
+    <tns:${typeNameMin}  ${tns ? `xmlns:tns="${escapeXml(tns)}"` : ''}>
       <tns:${geometryName}>
           ${geometry}
       </tns:${geometryName}>
@@ -219,11 +238,11 @@ ${this.singleUpdate2_0_0(options)}
       </wfs:Property>`
         }
       // Final result
-        return `<wfs:Update typeName="${options.typeName}">
+        return `<wfs:Update typeName="${escapeXml(options.typeName)}">
       ${properties}
       ${geometryContent}
       <fes:Filter>
-         <fes:ResourceId rid="${options.feature.id}"/>
+         <fes:ResourceId rid="${escapeXml(options.feature.id)}"/>
       </fes:Filter>
    </wfs:Update>`;
     }
@@ -244,7 +263,7 @@ ${this.singleUpdate2_0_0(options)}
                 const s =
 `<${prefix}:Property>
     <${prefix}:ValueReference>${key}</${prefix}:ValueReference>
-    <${prefix}:Value>${properties[key]}</${prefix}:Value>
+    <${prefix}:Value>${escapeXml(properties[key])}</${prefix}:Value>
 </${prefix}:Property>
 `
                 result+=s;
@@ -266,7 +285,7 @@ ${this.singleUpdate2_0_0(options)}
         let result = "";
         for (const key in properties) {
             if (properties.hasOwnProperty(key)) {
-                const s = `<${prefix}:${key}>${properties[key]}</${prefix}:${key}>`
+                const s = `<${prefix}:${key}>${escapeXml(properties[key])}</${prefix}:${key}>`
                 result+=s;
             }
         }
@@ -313,7 +332,7 @@ ${this.singleUpdate2_0_0(options)}
         return this.prettyPrint(`<?xml version="1.0" ?>
 <wfs:Transaction
    version="2.0.0"
-   lockId="${options.lockItem.lockId}"
+   lockId="${escapeXml(options.lockItem.lockId)}"
    service="WFS"
    xmlns:fes="http://www.opengis.net/fes/2.0"
    xmlns:gml="http://www.opengis.net/gml/3.2"
@@ -335,7 +354,7 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
      * @returns the request XML.
      */
     public static GetFeatureWithLock2_0_0(options: WFSTGetFeatureWithLockOptions ) {
-        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${rid}"/>`);
+        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${escapeXml(rid)}"/>`);
         // Expiry is in seconds, 300 = 5 minutes. Our options.expiry is in minutes, therefor we multiply * 60
         const expiry = typeof options.expiry !== "undefined" ? `${options.expiry*60}` : "300";
         return this.prettyPrint(`<?xml version="1.0" ?>
@@ -349,7 +368,7 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
     outputFormat="application/gml+xml; version=3.2"
     expiry="${expiry}"
     lockAction="ALL">    
-    <wfs:Query typeNames="${options.typeName}">
+    <wfs:Query typeNames="${escapeXml(options.typeName)}">
         <fes:Filter>         
             <fes:Or>
                 ${allRids.join(" ")}                
@@ -371,7 +390,7 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
         return this.prettyPrint(`<wfs:ReleaseLock
     service="WFS"
     version="2.0.0"
-    lockId="${options.lockId}"
+    lockId="${escapeXml(options.lockId)}"
     xmlns:wfs="http://www.opengis.net/wfs/2.0">
 </wfs:ReleaseLock>`, options.prettyPrint);
     }
@@ -384,7 +403,7 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
      * @returns the request XML.
      */
     static LockFeature2_0_0(options: WFSTGetFeatureWithLockOptions ) {
-        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${rid}"/>`);
+        const allRids = options.rids.map(rid=>`<fes:ResourceId rid="${escapeXml(rid)}"/>`);
         // Expiry is in seconds, 300 = 5 minutes. Our options.expiry is in minutes, therefor we multiply * 60
         const expiry = typeof options.expiry !== "undefined" ? `${options.expiry*60}` : "300";
         return this.prettyPrint(`<?xml version="1.0" ?>
@@ -397,7 +416,7 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
     xmlns:example="http://www.example.com"
     expiry="${expiry}"
     lockAction="ALL">    
-    <wfs:Query typeNames="${options.typeName}">
+    <wfs:Query typeNames="${escapeXml(options.typeName)}">
         <fes:Filter>         
             <fes:Or>
                 ${allRids.join(" ")}                
