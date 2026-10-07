@@ -78,7 +78,7 @@ export class GMLFeatureEncoder {
         const gmlGeometry = options.targetGeometry;
         this.targetGeometry = GMLGeometryTypeToGeometry(gmlGeometry);
         this.wrapToMultiGeometry = typeof options.wrapToMultiGeometry !== "undefined" ? options.wrapToMultiGeometry: this.targetGeometry === "MultiGeometry";
-        this.wrapToMultiSurface = typeof options.wrapToMultiGeometry !== "undefined" ? options.wrapToMultiSurface: (this.targetGeometry === "MultiSurface" || this.targetGeometry === "MultiPolygon");
+        this.wrapToMultiSurface = typeof options.wrapToMultiSurface !== "undefined" ? options.wrapToMultiSurface: (this.targetGeometry === "MultiSurface" || this.targetGeometry === "MultiPolygon");
         this.wrapToMultiCurve = typeof options.wrapToMultiCurve !== "undefined" ? options.wrapToMultiCurve: (this.targetGeometry === "MultiCurve" || this.targetGeometry === "MultiLineString");
         this.wrapToMultiPoint = typeof options.wrapToMultiPoint !== "undefined" ? options.wrapToMultiPoint: (this.targetGeometry === "MultiPoint");
         this.invert = options.invert;

@@ -61,3 +61,14 @@ describe('WFSTQueries XML escaping', () => {
         expect(resourceIds[0].getAttribute("rid")).toBe(rid);
     });
 });
+
+describe('WFSTQueries lock requests', () => {
+    it('LockFeature: a well-formed <wfs:LockFeature> document', () => {
+        const xml = WFSTQueries.LockFeature2_0_0({typeName: "tns:t", rids: ["t.1"]});
+        const doc = parse(xml);
+
+        expect(doc.getElementsByTagName("parsererror").length).toBe(0);
+        expect(doc.documentElement.localName).toBe("LockFeature");
+        expect(xml).not.toContain("GetFeatureWithLock");
+    });
+});

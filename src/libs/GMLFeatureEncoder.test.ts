@@ -79,6 +79,14 @@ describe('GMLFeatureEncoder wrapToMulti* branches', () => {
         expect((geometry.match(/surfaceMember/g) || []).length).toBe(2); // open + close tag
     });
 
+    it('wrapToMultiSurface: still defaults from the target schema when only wrapToMultiGeometry is given', () => {
+        const encoder = new GMLFeatureEncoder({targetGeometry: "gml:MultiSurfacePropertyType", wrapToMultiGeometry: false});
+        const feature = new Feature(createPolygon(reference, [[0, 0], [0, 1], [1, 1], [0, 0]]), {}, "f.1");
+
+        const {geometryType} = encoder.encodeFeature(feature);
+        expect(geometryType).toBe("MultiSurface");
+    });
+
     it('wrapToMultiSurface: an already-MultiPolygon feature is remapped (not re-wrapped) to MultiSurface', () => {
         const encoder = new GMLFeatureEncoder({targetGeometry: "gml:MultiSurfacePropertyType"});
         const shapeList = createShapeList(reference, [

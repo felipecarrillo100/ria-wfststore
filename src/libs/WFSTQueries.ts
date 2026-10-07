@@ -393,6 +393,6 @@ http://schemas.opengis.net/wfs/2.0.0/wfs.xsd">
             </fes:Or>
         </fes:Filter>
     </wfs:Query>
-</wfs:GetFeatureWithLock>`, options.prettyPrint);
+</wfs:LockFeature>`, options.prettyPrint);
     }
 }

@@ -84,7 +84,7 @@ const gmlToJSONGeometry: { [key: string]: GMLGeometryNames } = {
     "gml:MultiSurfacePropertyType": "MultiSurface",
 }
 /** Any GML geometry property type key {@link gmlToJSONGeometry} recognizes. */
-export type GMLGeometryTypeKey = keyof typeof xsdToJsonMap;
+export type GMLGeometryTypeKey = keyof typeof gmlToJSONGeometry;
 
 /**
  * @param key a schema's `gml:*PropertyType` attribute value.

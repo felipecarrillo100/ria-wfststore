@@ -136,8 +136,8 @@ export class WFSTResponses {
      * {@link WFSTFeatureStore.getFeatureWithLock}.
      *
      * @param xmlString the response body.
-     * @returns the lock id and query metadata (all undefined if the response has no
-     *          `wfs:FeatureCollection` root).
+     * @returns the lock id and query metadata (all undefined if the response has no WFS 2.0
+     *          `FeatureCollection` root, whatever its prefix).
      */
     static parseXMLGetFeaturesWithLock(xmlString: string) {
         const parser = new DOMParser();
@@ -145,7 +145,7 @@ export class WFSTResponses {
         const getAttributeValue = (element: any, attributeName:string) => {
             return element ? element.getAttribute(attributeName) : undefined;
         };
-        const featureCollection = xmlDoc.getElementsByTagName("wfs:FeatureCollection")[0];
+        const featureCollection = xmlDoc.getElementsByTagNameNS("http://www.opengis.net/wfs/2.0", "FeatureCollection")[0];
         const lockId = getAttributeValue(featureCollection, "lockId");
         const numberMatched = getAttributeValue(featureCollection, "numberMatched");
         const numberReturned = getAttributeValue(featureCollection, "numberReturned");
@@ -162,7 +162,7 @@ export class WFSTResponses {
      * Parses a `LockFeature` response's lock id - see {@link WFSTFeatureStore.lockFeatures}.
      *
      * @param xmlString the response body.
-     * @returns the lock id (undefined if the response has no `wfs:LockFeatureResponse` root).
+     * @returns the lock id (undefined if the response has no WFS 2.0 `LockFeatureResponse` root, whatever its prefix).
      */
     static parseXMLLockFeatures(xmlString: string) {
         const parser = new DOMParser();
@@ -170,7 +170,7 @@ export class WFSTResponses {
         const getAttributeValue = (element: any, attributeName:string) => {
             return element ? element.getAttribute(attributeName) : undefined;
         };
-        const lockFeatureResponse = xmlDoc.getElementsByTagName("wfs:LockFeatureResponse")[0];
+        const lockFeatureResponse = xmlDoc.getElementsByTagNameNS("http://www.opengis.net/wfs/2.0", "LockFeatureResponse")[0];
         const lockId = getAttributeValue(lockFeatureResponse, "lockId");
         return {
             lockId,

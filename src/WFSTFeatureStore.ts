@@ -675,7 +675,7 @@ export class WFSTFeatureStore extends WFSFeatureStore {
     private fetchSettingsOptions(options: FetchSettingsOptions):  RequestInit {
         const headers = {...this.options.requestHeaders, ...options.headers};
         const Accept = this.options.requestHeaders ? this.options.requestHeaders.Accept : undefined;
-        headers.Accept = (Accept && options.headers.Accept) ? Accept+";" + options.headers.Accept : options.headers.Accept;
+        headers.Accept = (Accept && options.headers.Accept) ? Accept + ", " + options.headers.Accept : options.headers.Accept;
         return {
             method: options.method,
             // Same mapping RIA's own requests use for this option.
